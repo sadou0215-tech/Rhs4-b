@@ -85,6 +85,7 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
 .cats[hidden]{display:none}
 .cat{flex:none;padding:6px 16px;border-radius:99px;border:1px solid var(--line);background:var(--panel);font-weight:700}
 .cat[aria-pressed=true]{background:var(--main);color:var(--onmain);border-color:var(--main)}
+dialog input:disabled{opacity:.4}
 @media (max-width:800px){
  .app{grid-template-columns:1fr;grid-template-rows:1fr auto}
  .cart{border-left:0;border-top:1px solid var(--line);max-height:52dvh}
@@ -145,7 +146,8 @@ const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411
   <label for="ct">ジャンル(例: ドリンク。空欄なら未分類)</label>
   <input type="text" id="ct" list="ctl" maxlength="20">
   <datalist id="ctl"></datalist>
-  <label for="st">在庫数(空欄なら管理しない)</label>
+  <label for="st">在庫数</label>
+  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:4px 0"><input type="checkbox" id="inf" style="width:auto"> 無限(在庫を数えない)</label>
   <input type="number" id="st" inputmode="numeric" min="0">
   <div class="row">
     <button class="del" id="del" hidden>削除</button>
@@ -165,6 +167,7 @@ const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411
     <h2 style="margin:0;font-size:1.1rem">今日の売上</h2>
     <div class="big" id="today"></div>
     <div id="tcount" style="color:var(--sub)"></div>
+    <button class="link" id="resetToday" style="color:var(--danger)">今日の売上をリセット</button>
     <ul id="sold"></ul>
     <h3>在庫</h3>
     <ul id="stock"></ul>
@@ -263,7 +266,9 @@ function openDlg(p){
   editing=p;img=p?p.img:'';
   $('#dt').textContent=p?'商品を編集':'商品を追加';
   $('#nm').value=p?p.name:'';$('#pr').value=p?p.price:'';$('#file').value='';
-  $('#st').value=p&&typeof p.stock==='number'?p.stock:'';
+  const unl=!(p&&typeof p.stock==='number');
+  $('#inf').checked=unl;$('#st').disabled=unl;
+  $('#st').value=unl?'':p.stock;
   $('#ct').value=p?catOf(p):(cat.startsWith('c:')?cat.slice(2):'');
   $('#ctl').innerHTML=[...new Set(products.map(catOf).filter(Boolean))].map(n=>`<option value="${esc(n)}">`).join('');
   $('#prev').src=img||'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
@@ -275,7 +280,9 @@ $('#cancel').onclick=()=>$('#dlg').close();
 $('#ok').onclick=()=>{
   const name=$('#nm').value.trim(),price=parseInt($('#pr').value,10);
   if(!name||isNaN(price)||price<0){alert('商品名と値段を入力してください。');return}
-  const sv=parseInt($('#st').value,10),stock=isNaN(sv)?null:Math.max(0,sv);
+  const inf=$('#inf').checked,sv=parseInt($('#st').value,10);
+  if(!inf&&isNaN(sv)){alert('在庫数を入力するか、「無限」にチェックを入れてください。');return}
+  const stock=inf?null:Math.max(0,sv);
   const p=editing||{id:'p'+Date.now()};
   Object.assign(p,{name,price,img,stock,category:$('#ct').value.trim()});
   if(!editing)products.push(p);
@@ -286,6 +293,7 @@ $('#del').onclick=()=>{
   const id=editing.id;products=products.filter(p=>p!==editing);delete cart[id];
   delProduct(id);$('#dlg').close();redraw();
 };
+$('#inf').onchange=()=>{$('#st').disabled=$('#inf').checked};
 /* --- ジャンル --- */
 let cat='all';
 const catOf=p=>(p.category||'').trim();
@@ -363,7 +371,7 @@ if(sync){
 /* --- 一覧バー --- */
 function drawGlance(){
   const t=getSales()[today()]||{total:0,count:0},hide=rd('reji-hide',false);
-  const chips=products.filter(p=>typeof p.stock==='number').map(p=>`<span class="chip${p.stock===0?' zero':p.stock<=3?' low':''}">${esc(p.name)}<b>${p.stock}</b></span>`).join('')||'<span class="chip">在庫を管理する商品はありません</span>';
+  const chips=products.filter(p=>typeof p.stock==='number').map(p=>`<span class="chip${p.stock===0?' zero':p.stock<=3?' low':''}">${esc(p.name)}<b>${p.stock}</b></span>`).join('')||'<span class="chip">在庫を数える商品はありません</span>';
   $('#glance').innerHTML=`<div class="gs"><span>今日の売上</span><b>${hide?'¥•••':yen(t.total)}</b><span>${t.count}件</span><button class="link" id="hideBtn">${hide?'金額を表示':'金額を隠す'}</button></div><div class="chips">${chips}</div>`;
 }
 $('#glance').addEventListener('click',e=>{if(e.target.id==='hideBtn'){wr('reji-hide',!rd('reji-hide',false));drawGlance()}});
@@ -383,7 +391,7 @@ function renderRep(){
   $('#today').textContent=yen(t.total);
   $('#tcount').textContent=t.count+'件の会計';
   $('#sold').innerHTML=Object.values(t.items).map(i=>`<li><span>${esc(i.name)} × ${i.qty}</span><span>${yen(i.amt)}</span></li>`).join('')||'<li class="none">まだ売上がありません</li>';
-  $('#stock').innerHTML=products.map(p=>{const st=typeof p.stock==='number';return `<li><span>${esc(p.name)}</span><span class="${st&&p.stock===0?'short':''}">${st?(p.stock===0?'売り切れ':p.stock+'個'):'管理しない'}</span></li>`}).join('')||'<li class="none">商品がありません</li>';
+  $('#stock').innerHTML=products.map(p=>{const st=typeof p.stock==='number';return `<li><span>${esc(p.name)}</span><span class="${st&&p.stock===0?'short':''}">${st?(p.stock===0?'売り切れ':p.stock+'個'):'∞ 無限'}</span></li>`}).join('')||'<li class="none">商品がありません</li>';
   $('#days').innerHTML=Object.keys(s).sort().reverse().slice(0,14).map(d=>`<li><span>${d}</span><span>${yen(s[d].total)}</span></li>`).join('')||'<li class="none">記録がありません</li>';
 }
 $('#admBtn').onclick=()=>{
@@ -407,6 +415,13 @@ $('#gok').onclick=async()=>{
 $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#gok').click()});
 $('#gcancel').onclick=$('#rclose').onclick=()=>$('#adm').close();
 $('#chpw').onclick=()=>{gateMode='set';showGate()};
+async function resetToday(){
+  if(!confirm('今日の売上の記録を消します。在庫は元に戻りません。よろしいですか?'))return;
+  const k=today();
+  if(sync){try{await db.collection('sales').doc(k).delete()}catch(e){fail(e)}return}
+  const s=rd(SALES,{});delete s[k];wr(SALES,s);renderRep();drawGlance();
+}
+$('#resetToday').onclick=resetToday;
 $('#adm').addEventListener('close',()=>{$('#rep').hidden=true;$('#gate').hidden=false});
 redraw();
 </script>
