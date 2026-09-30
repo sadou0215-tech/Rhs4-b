@@ -394,11 +394,9 @@ if(sync){
 }
 /* --- 一覧バー --- */
 function drawGlance(){
-  const t=getSales()[today()]||{total:0,count:0},hide=rd('reji-hide',false);
   const chips=products.filter(p=>typeof p.stock==='number').map(p=>`<span class="chip${p.stock===0?' zero':p.stock<=3?' low':''}">${esc(p.name)}<b>${p.stock}</b></span>`).join('')||'<span class="chip">在庫を数える商品はありません</span>';
-  $('#glance').innerHTML=`<div class="gs"><span>今日の売上</span><b>${hide?'¥•••':yen(t.total)}</b><span>${t.count}件</span><button class="link" id="hideBtn">${hide?'金額を表示':'金額を隠す'}</button></div><div class="chips">${chips}</div>`;
+  $('#glance').innerHTML=`<div class="chips">${chips}</div>`;
 }
-$('#glance').addEventListener('click',e=>{if(e.target.id==='hideBtn'){wr('reji-hide',!rd('reji-hide',false));drawGlance()}});
 /* --- 売上・在庫(パスワード) --- */
 let gateMode='unlock';
 async function hash(pw,salt){
