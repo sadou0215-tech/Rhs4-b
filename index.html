@@ -70,6 +70,15 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
 #adm input{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
 .big{font-size:2.2rem;font-weight:800}
 .err{color:var(--danger);min-height:1.5em;margin:6px 0 0}
+.glance{padding:0 16px 8px;display:flex;flex-direction:column;gap:6px}
+.gs{display:flex;align-items:baseline;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 14px}
+.gs b{font-size:1.5rem}
+.gs .link{margin-left:auto}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+.chip{flex:none;background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:2px 12px;font-size:.9rem;white-space:nowrap}
+.chip b{margin-left:4px}
+.chip.low{border-color:var(--hi);background:var(--hi);color:var(--onhi)}
+.chip.zero{border-color:var(--danger);color:var(--danger)}
 @media (max-width:800px){
  .app{grid-template-columns:1fr;grid-template-rows:1fr auto}
  .cart{border-left:0;border-top:1px solid var(--line);max-height:52dvh}
@@ -89,6 +98,7 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
         <button class="toggle" id="editBtn" aria-pressed="false">商品を編集</button>
       </div>
     </header>
+    <div class="glance" id="glance"></div>
     <div class="grid" id="grid"></div>
   </section>
 
@@ -185,7 +195,7 @@ function drawChange(){
   if(paid<t){cl.textContent='不足';cv.textContent=yen(t-paid);cv.className='short'}
   else{cl.textContent='お釣り';cv.textContent=yen(paid-t)}
 }
-const redraw=()=>{drawGrid();drawCart()};
+const redraw=()=>{drawGrid();drawCart();drawGlance()};
 
 $('#grid').addEventListener('click',e=>{
   if(e.target.closest('#addBtn'))return openDlg(null);
@@ -251,6 +261,13 @@ $('#del').onclick=()=>{
   products=products.filter(p=>p!==editing);delete cart[editing.id];
   save();$('#dlg').close();redraw();
 };
+/* --- 一覧バー --- */
+function drawGlance(){
+  const t=rd(SALES,{})[today()]||{total:0,count:0},hide=rd('reji-hide',false);
+  const chips=products.filter(p=>typeof p.stock==='number').map(p=>`<span class="chip${p.stock===0?' zero':p.stock<=3?' low':''}">${esc(p.name)}<b>${p.stock}</b></span>`).join('')||'<span class="chip">在庫を管理する商品はありません</span>';
+  $('#glance').innerHTML=`<div class="gs"><span>今日の売上</span><b>${hide?'¥•••':yen(t.total)}</b><span>${t.count}件</span><button class="link" id="hideBtn">${hide?'金額を表示':'金額を隠す'}</button></div><div class="chips">${chips}</div>`;
+}
+$('#glance').addEventListener('click',e=>{if(e.target.id==='hideBtn'){wr('reji-hide',!rd('reji-hide',false));drawGlance()}});
 /* --- 売上・在庫(パスワード) --- */
 let gateMode='unlock';
 async function hash(pw,salt){
