@@ -60,6 +60,16 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
 .row button{flex:1;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);font-weight:700}
 .row .ok{background:var(--main);color:var(--onmain);border-color:var(--main)}
 .row .del{color:var(--danger)}
+.soldout{position:absolute;left:8px;top:8px;background:var(--danger);color:var(--panel);border-radius:8px;padding:2px 8px;font-weight:800;font-size:.85rem}
+.out .ph,.out .noimg{opacity:.45;filter:grayscale(1)}
+.left{color:var(--sub);font-size:.85rem;margin-left:6px}
+#adm{max-height:88dvh}
+#adm ul{list-style:none;margin:0 0 8px;padding:0}
+#adm li{display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line)}
+#adm h3{margin:16px 0 4px;font-size:.95rem}
+#adm input{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.big{font-size:2.2rem;font-weight:800}
+.err{color:var(--danger);min-height:1.5em;margin:6px 0 0}
 @media (max-width:800px){
  .app{grid-template-columns:1fr;grid-template-rows:1fr auto}
  .cart{border-left:0;border-top:1px solid var(--line);max-height:52dvh}
@@ -74,7 +84,10 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
   <section class="shop">
     <header>
       <h1>かんたんレジ</h1>
-      <button class="toggle" id="editBtn" aria-pressed="false">商品を編集</button>
+      <div style="display:flex;gap:8px">
+        <button class="toggle" id="admBtn">🔒 売上・在庫</button>
+        <button class="toggle" id="editBtn" aria-pressed="false">商品を編集</button>
+      </div>
     </header>
     <div class="grid" id="grid"></div>
   </section>
@@ -105,10 +118,32 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
   <input type="text" id="nm" maxlength="30">
   <label for="pr">値段(円)</label>
   <input type="number" id="pr" inputmode="numeric" min="0">
+  <label for="st">在庫数(空欄なら管理しない)</label>
+  <input type="number" id="st" inputmode="numeric" min="0">
   <div class="row">
     <button class="del" id="del" hidden>削除</button>
     <button id="cancel">やめる</button>
     <button class="ok" id="ok">保存</button>
+  </div>
+</dialog>
+
+<dialog id="adm">
+  <div id="gate">
+    <h2 id="gt" style="margin:0 0 10px;font-size:1.1rem"></h2>
+    <input type="password" id="pw" autocomplete="off" aria-label="パスワード">
+    <p class="err" id="gerr"></p>
+    <div class="row"><button id="gcancel">閉じる</button><button class="ok" id="gok">開く</button></div>
+  </div>
+  <div id="rep" hidden>
+    <h2 style="margin:0;font-size:1.1rem">今日の売上</h2>
+    <div class="big" id="today"></div>
+    <div id="tcount" style="color:var(--sub)"></div>
+    <ul id="sold"></ul>
+    <h3>在庫</h3>
+    <ul id="stock"></ul>
+    <h3>日別の売上(新しい順)</h3>
+    <ul id="days"></ul>
+    <div class="row"><button id="chpw">パスワード変更</button><button class="ok" id="rclose">閉じる</button></div>
   </div>
 </dialog>
 
@@ -126,10 +161,11 @@ function shrink(file){return new Promise(res=>{const r=new FileReader();r.onload
 function drawGrid(){
   const g=$('#grid');g.classList.toggle('edit',edit);
   let h=products.length?'':'<p class="empty">まだ商品がありません。「＋ 商品を追加」から写真と値段を登録しましょう。</p>';
-  h+=products.map(p=>`<button class="tile" data-id="${p.id}">
+  h+=products.map(p=>{const st=typeof p.stock==='number';return `<button class="tile${st&&p.stock===0&&!edit?' out':''}" data-id="${p.id}">
     ${p.img?`<img class="ph" src="${p.img}" alt="">`:'<div class="noimg">🛒</div>'}
     ${!edit&&cart[p.id]?`<span class="badge">${cart[p.id]}</span>`:''}
-    <div class="info"><div class="nm">${esc(p.name)}</div><div class="pr">${yen(p.price)}</div></div></button>`).join('');
+    ${!edit&&st&&p.stock===0?'<span class="soldout">売り切れ</span>':''}
+    <div class="info"><div class="nm">${esc(p.name)}</div><div class="pr">${yen(p.price)}${st&&p.stock>0?`<span class="left">残り${p.stock}</span>`:''}</div></div></button>`}).join('');
   if(edit||!products.length)h+='<button class="add" id="addBtn">＋ 商品を追加</button>';
   g.innerHTML=h;
 }
@@ -156,11 +192,13 @@ $('#grid').addEventListener('click',e=>{
   const t=e.target.closest('.tile');if(!t)return;
   const id=t.dataset.id;
   if(edit)return openDlg(products.find(p=>p.id===id));
+  const p=products.find(x=>x.id===id);
+  if(typeof p.stock==='number'&&(cart[id]||0)>=p.stock)return;
   cart[id]=(cart[id]||0)+1;redraw();
 });
 $('#lines').addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
-  if(b.dataset.a)cart[b.dataset.a]++;
+  if(b.dataset.a){const p=products.find(x=>x.id===b.dataset.a);if(!(typeof p.stock==='number'&&cart[p.id]>=p.stock))cart[p.id]++}
   if(b.dataset.m&&--cart[b.dataset.m]<=0)delete cart[b.dataset.m];
   redraw();
 });
@@ -172,12 +210,28 @@ document.querySelector('.paid').addEventListener('click',e=>{
 });
 const reset=()=>{cart={};$('#paid').value='';redraw()};
 $('#clear').onclick=()=>{if(!Object.keys(cart).length||confirm('お会計の内容を全部消しますか?'))reset()};
-$('#done').onclick=reset;
+const SALES='reji-sales-v1',PW='reji-pw-v1';
+const rd=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
+const wr=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){alert('保存できませんでした。')}};
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+$('#done').onclick=()=>{
+  const items=products.filter(p=>cart[p.id]);
+  if(!items.length)return;
+  const s=rd(SALES,{}),k=today(),d=s[k]||(s[k]={total:0,count:0,items:{}});
+  items.forEach(p=>{
+    const q=cart[p.id],it=d.items[p.id]||(d.items[p.id]={name:p.name,qty:0,amt:0});
+    it.qty+=q;it.amt+=p.price*q;d.total+=p.price*q;
+    if(typeof p.stock==='number')p.stock=Math.max(0,p.stock-q);
+  });
+  d.count++;
+  wr(SALES,s);save();reset();
+};
 
 function openDlg(p){
   editing=p;img=p?p.img:'';
   $('#dt').textContent=p?'商品を編集':'商品を追加';
   $('#nm').value=p?p.name:'';$('#pr').value=p?p.price:'';$('#file').value='';
+  $('#st').value=p&&typeof p.stock==='number'?p.stock:'';
   $('#prev').src=img||'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
   $('#del').hidden=!p;
   $('#dlg').showModal();
@@ -187,8 +241,9 @@ $('#cancel').onclick=()=>$('#dlg').close();
 $('#ok').onclick=()=>{
   const name=$('#nm').value.trim(),price=parseInt($('#pr').value,10);
   if(!name||isNaN(price)||price<0){alert('商品名と値段を入力してください。');return}
-  if(editing)Object.assign(editing,{name,price,img});
-  else products.push({id:'p'+Date.now(),name,price,img});
+  const sv=parseInt($('#st').value,10),stock=isNaN(sv)?null:Math.max(0,sv);
+  if(editing)Object.assign(editing,{name,price,img,stock});
+  else products.push({id:'p'+Date.now(),name,price,img,stock});
   save();$('#dlg').close();redraw();
 };
 $('#del').onclick=()=>{
@@ -196,6 +251,46 @@ $('#del').onclick=()=>{
   products=products.filter(p=>p!==editing);delete cart[editing.id];
   save();$('#dlg').close();redraw();
 };
+/* --- 売上・在庫(パスワード) --- */
+let gateMode='unlock';
+async function hash(pw,salt){
+  const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(salt+pw));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+function showGate(){
+  $('#gate').hidden=false;$('#rep').hidden=true;$('#pw').value='';$('#gerr').textContent='';
+  $('#gt').textContent=gateMode==='set'?'パスワードを決める(4文字以上)':'パスワードを入力';
+  $('#gok').textContent=gateMode==='set'?'決定':'開く';
+}
+function renderRep(){
+  const s=rd(SALES,{}),t=s[today()]||{total:0,count:0,items:{}};
+  $('#today').textContent=yen(t.total);
+  $('#tcount').textContent=t.count+'件の会計';
+  $('#sold').innerHTML=Object.values(t.items).map(i=>`<li><span>${esc(i.name)} × ${i.qty}</span><span>${yen(i.amt)}</span></li>`).join('')||'<li class="none">まだ売上がありません</li>';
+  $('#stock').innerHTML=products.map(p=>{const st=typeof p.stock==='number';return `<li><span>${esc(p.name)}</span><span class="${st&&p.stock===0?'short':''}">${st?(p.stock===0?'売り切れ':p.stock+'個'):'管理しない'}</span></li>`}).join('')||'<li class="none">商品がありません</li>';
+  $('#days').innerHTML=Object.keys(s).sort().reverse().slice(0,14).map(d=>`<li><span>${d}</span><span>${yen(s[d].total)}</span></li>`).join('')||'<li class="none">記録がありません</li>';
+}
+$('#admBtn').onclick=()=>{
+  if(!(window.crypto&&crypto.subtle)){alert('この環境ではパスワード機能が使えません。https のアドレスで開いてください。');return}
+  gateMode=rd(PW,null)?'unlock':'set';
+  showGate();$('#adm').showModal();
+};
+$('#gok').onclick=async()=>{
+  const pw=$('#pw').value;
+  if(gateMode==='set'){
+    if(pw.length<4){$('#gerr').textContent='4文字以上にしてください。';return}
+    const salt=Date.now()+'-'+Math.random();
+    wr(PW,{salt,h:await hash(pw,salt)});
+  }else{
+    const saved=rd(PW,null);
+    if(!saved||await hash(pw,saved.salt)!==saved.h){$('#gerr').textContent='パスワードが違います。';return}
+  }
+  $('#gate').hidden=true;$('#rep').hidden=false;renderRep();
+};
+$('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#gok').click()});
+$('#gcancel').onclick=$('#rclose').onclick=()=>$('#adm').close();
+$('#chpw').onclick=()=>{gateMode='set';showGate()};
+$('#adm').addEventListener('close',()=>{$('#rep').hidden=true;$('#gate').hidden=false});
 redraw();
 </script>
 </body>
