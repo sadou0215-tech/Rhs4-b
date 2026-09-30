@@ -70,6 +70,8 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
 #adm input{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
 .big{font-size:2.2rem;font-weight:800}
 .err{color:var(--danger);min-height:1.5em;margin:6px 0 0}
+#login label{display:block;margin:10px 0 4px;font-weight:700;font-size:.9rem}
+#login input{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
 .glance{padding:0 16px 8px;display:flex;flex-direction:column;gap:6px}
 .gs{display:flex;align-items:baseline;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 14px}
 .gs b{font-size:1.5rem}
@@ -87,6 +89,13 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
 }
 @media (prefers-reduced-motion:reduce){.tile{transition:none}}
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+/* ▼ Firebaseの設定をここに貼り付ける(空のままなら、この端末だけで動く従来モード) ▼ */
+const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411b4.firebaseapp.com",projectId:"rhs4b-411b4",appId:"1:631098519997:web:7e98522cb49fceaee3e2d4"};
+</script>
 </head>
 <body>
 <div class="app" id="app">
@@ -153,8 +162,19 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
     <ul id="stock"></ul>
     <h3>日別の売上(新しい順)</h3>
     <ul id="days"></ul>
+    <button class="link" id="migrate" hidden>この端末のデータをクラウドへ移す(初回のみ)</button>
     <div class="row"><button id="chpw">パスワード変更</button><button class="ok" id="rclose">閉じる</button></div>
   </div>
+</dialog>
+
+<dialog id="login">
+  <h2 style="margin:0 0 6px;font-size:1.1rem">レジにログイン</h2>
+  <label for="em">メールアドレス</label>
+  <input type="email" id="em" autocomplete="username">
+  <label for="lp">パスワード</label>
+  <input type="password" id="lp" autocomplete="current-password">
+  <p class="err" id="lerr"></p>
+  <div class="row"><button class="ok" id="lok">ログイン</button></div>
 </dialog>
 
 <script>
@@ -227,14 +247,7 @@ const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth
 $('#done').onclick=()=>{
   const items=products.filter(p=>cart[p.id]);
   if(!items.length)return;
-  const s=rd(SALES,{}),k=today(),d=s[k]||(s[k]={total:0,count:0,items:{}});
-  items.forEach(p=>{
-    const q=cart[p.id],it=d.items[p.id]||(d.items[p.id]={name:p.name,qty:0,amt:0});
-    it.qty+=q;it.amt+=p.price*q;d.total+=p.price*q;
-    if(typeof p.stock==='number')p.stock=Math.max(0,p.stock-q);
-  });
-  d.count++;
-  wr(SALES,s);save();reset();
+  recordSale(items);reset();
 };
 
 function openDlg(p){
@@ -252,18 +265,80 @@ $('#ok').onclick=()=>{
   const name=$('#nm').value.trim(),price=parseInt($('#pr').value,10);
   if(!name||isNaN(price)||price<0){alert('商品名と値段を入力してください。');return}
   const sv=parseInt($('#st').value,10),stock=isNaN(sv)?null:Math.max(0,sv);
-  if(editing)Object.assign(editing,{name,price,img,stock});
-  else products.push({id:'p'+Date.now(),name,price,img,stock});
-  save();$('#dlg').close();redraw();
+  const p=editing||{id:'p'+Date.now()};
+  Object.assign(p,{name,price,img,stock});
+  if(!editing)products.push(p);
+  putProduct(p);$('#dlg').close();redraw();
 };
 $('#del').onclick=()=>{
   if(!confirm(`「${editing.name}」を削除しますか?`))return;
-  products=products.filter(p=>p!==editing);delete cart[editing.id];
-  save();$('#dlg').close();redraw();
+  const id=editing.id;products=products.filter(p=>p!==editing);delete cart[id];
+  delProduct(id);$('#dlg').close();redraw();
 };
+/* --- 保存先(同期モード / この端末だけモード) --- */
+const sync=!!FB.apiKey&&!FB.apiKey.startsWith('ここに');
+let db,salesCache={},pwCache=null,pwLoaded=false,unsubs=[];
+const getSales=()=>sync?salesCache:rd(SALES,{});
+const getPw=()=>sync?pwCache:rd(PW,null);
+const setPw=v=>sync?db.doc('config/pw').set(v):wr(PW,v);
+const fail=e=>alert('保存できませんでした: '+e.message);
+const putProduct=p=>sync?db.collection('products').doc(p.id).set(p).catch(fail):save();
+const delProduct=id=>sync?db.collection('products').doc(id).delete().catch(fail):save();
+function recordSale(items){
+  const k=today();
+  if(!sync){
+    const s=rd(SALES,{}),d=s[k]||(s[k]={total:0,count:0,items:{}});
+    items.forEach(p=>{const q=cart[p.id],it=d.items[p.id]||(d.items[p.id]={name:p.name,qty:0,amt:0});it.qty+=q;it.amt+=p.price*q;d.total+=p.price*q;if(typeof p.stock==='number')p.stock=Math.max(0,p.stock-q)});
+    d.count++;wr(SALES,s);save();return;
+  }
+  const inc=firebase.firestore.FieldValue.increment,b=db.batch(),its={};let tot=0;
+  items.forEach(p=>{
+    const q=cart[p.id];its[p.id]={name:p.name,qty:inc(q),amt:inc(p.price*q)};tot+=p.price*q;
+    if(typeof p.stock==='number')b.update(db.collection('products').doc(p.id),{stock:inc(-q)});
+  });
+  b.set(db.collection('sales').doc(k),{total:inc(tot),count:inc(1),items:its},{merge:true});
+  b.commit().catch(fail);
+}
+async function migrate(){
+  const lp=rd(KEY,[]),ls=rd(SALES,{}),lpw=rd(PW,null);
+  if(!lp.length&&!Object.keys(ls).length){alert('この端末に移せるデータはありません。');return}
+  if(!confirm('この端末の商品・売上をクラウドに登録します。1回だけ実行してください。'))return;
+  const b=db.batch();
+  lp.forEach(p=>b.set(db.collection('products').doc(p.id),p));
+  Object.keys(ls).forEach(k=>b.set(db.collection('sales').doc(k),ls[k]));
+  if(lpw&&!pwCache)b.set(db.doc('config/pw'),lpw);
+  try{await b.commit();alert('移しました。')}catch(e){fail(e)}
+}
+if(sync){
+  firebase.initializeApp(FB);
+  db=firebase.firestore();
+  db.enablePersistence({synchronizeTabs:true}).catch(()=>{});
+  $('#migrate').hidden=false;$('#migrate').onclick=migrate;
+  $('#lok').onclick=async()=>{
+    $('#lerr').textContent='';
+    try{await firebase.auth().signInWithEmailAndPassword($('#em').value.trim(),$('#lp').value)}
+    catch(e){$('#lerr').textContent='ログインできませんでした。メールアドレスとパスワードを確認してください。'}
+  };
+  $('#lp').addEventListener('keydown',e=>{if(e.key==='Enter')$('#lok').click()});
+  $('#login').addEventListener('cancel',e=>e.preventDefault());
+  firebase.auth().onAuthStateChanged(u=>{
+    unsubs.forEach(f=>f());unsubs=[];
+    if(!u){products=[];redraw();if(!$('#login').open)$('#login').showModal();return}
+    if($('#login').open)$('#login').close();
+    unsubs.push(db.collection('products').onSnapshot(q=>{
+      products=q.docs.map(d=>{const x=d.data();if(typeof x.stock==='number')x.stock=Math.max(0,x.stock);return{...x,id:d.id}}).sort((a,b)=>a.id<b.id?-1:1);
+      redraw();
+    },fail));
+    unsubs.push(db.collection('sales').onSnapshot(q=>{
+      salesCache={};q.forEach(d=>salesCache[d.id]=d.data());
+      drawGlance();if(!$('#rep').hidden)renderRep();
+    },fail));
+    unsubs.push(db.doc('config/pw').onSnapshot(d=>{pwCache=d.exists?d.data():null;pwLoaded=true},fail));
+  });
+}
 /* --- 一覧バー --- */
 function drawGlance(){
-  const t=rd(SALES,{})[today()]||{total:0,count:0},hide=rd('reji-hide',false);
+  const t=getSales()[today()]||{total:0,count:0},hide=rd('reji-hide',false);
   const chips=products.filter(p=>typeof p.stock==='number').map(p=>`<span class="chip${p.stock===0?' zero':p.stock<=3?' low':''}">${esc(p.name)}<b>${p.stock}</b></span>`).join('')||'<span class="chip">在庫を管理する商品はありません</span>';
   $('#glance').innerHTML=`<div class="gs"><span>今日の売上</span><b>${hide?'¥•••':yen(t.total)}</b><span>${t.count}件</span><button class="link" id="hideBtn">${hide?'金額を表示':'金額を隠す'}</button></div><div class="chips">${chips}</div>`;
 }
@@ -280,7 +355,7 @@ function showGate(){
   $('#gok').textContent=gateMode==='set'?'決定':'開く';
 }
 function renderRep(){
-  const s=rd(SALES,{}),t=s[today()]||{total:0,count:0,items:{}};
+  const s=getSales(),t=s[today()]||{total:0,count:0,items:{}};
   $('#today').textContent=yen(t.total);
   $('#tcount').textContent=t.count+'件の会計';
   $('#sold').innerHTML=Object.values(t.items).map(i=>`<li><span>${esc(i.name)} × ${i.qty}</span><span>${yen(i.amt)}</span></li>`).join('')||'<li class="none">まだ売上がありません</li>';
@@ -289,7 +364,8 @@ function renderRep(){
 }
 $('#admBtn').onclick=()=>{
   if(!(window.crypto&&crypto.subtle)){alert('この環境ではパスワード機能が使えません。https のアドレスで開いてください。');return}
-  gateMode=rd(PW,null)?'unlock':'set';
+  if(sync&&!pwLoaded){alert('同期中です。数秒待ってからもう一度押してください。');return}
+  gateMode=getPw()?'unlock':'set';
   showGate();$('#adm').showModal();
 };
 $('#gok').onclick=async()=>{
@@ -297,9 +373,9 @@ $('#gok').onclick=async()=>{
   if(gateMode==='set'){
     if(pw.length<4){$('#gerr').textContent='4文字以上にしてください。';return}
     const salt=Date.now()+'-'+Math.random();
-    wr(PW,{salt,h:await hash(pw,salt)});
+    await setPw({salt,h:await hash(pw,salt)});
   }else{
-    const saved=rd(PW,null);
+    const saved=getPw();
     if(!saved||await hash(pw,saved.salt)!==saved.h){$('#gerr').textContent='パスワードが違います。';return}
   }
   $('#gate').hidden=true;$('#rep').hidden=false;renderRep();
