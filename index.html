@@ -193,7 +193,11 @@ const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411
     <h3>日別の売上(新しい順)</h3>
     <ul id="days"></ul>
     <button class="link" id="migrate" hidden>この端末のデータをクラウドへ移す(初回のみ)</button>
-    <div class="row"><button id="chpw">パスワード変更</button><button class="ok" id="rclose">閉じる</button></div>
+    <div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
+      <button class="link" id="chpw">売上・在庫のパスワードを変更</button>
+      <button class="link" id="chpwe">商品編集のパスワードを変更</button>
+    </div>
+    <div class="row"><button class="ok" id="rclose">閉じる</button></div>
   </div>
 </dialog>
 
@@ -272,7 +276,7 @@ document.querySelector('.paid').addEventListener('click',e=>{
 });
 const reset=()=>{cart={};$('#paid').value='';redraw()};
 $('#clear').onclick=()=>{if(!Object.keys(cart).length||confirm('お会計の内容を全部消しますか?'))reset()};
-const SALES='reji-sales-v1',PW='reji-pw-v1';
+const SALES='reji-sales-v1',PW='reji-pw-v1',PWE='reji-pwe-v1';
 const rd=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
 const wr=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){alert('保存できませんでした。')}};
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
@@ -329,10 +333,10 @@ function drawCats(){
 $('#cats').addEventListener('click',e=>{const b=e.target.closest('.cat');if(!b)return;cat=b.dataset.c;drawCats();drawGrid()});
 /* --- 保存先(同期モード / この端末だけモード) --- */
 const sync=!!FB.apiKey&&!FB.apiKey.startsWith('ここに');
-let db,salesCache={},pwCache=null,pwLoaded=false,unsubs=[];
+let db,salesCache={},pwCache={},pwSeen={},pwLoaded=false,unsubs=[];
 const getSales=()=>sync?salesCache:rd(SALES,{});
-const getPw=()=>sync?pwCache:rd(PW,null);
-const setPw=v=>sync?db.doc('config/pw').set(v):wr(PW,v);
+const getPw=k=>sync?(pwCache[k]||null):rd(k==='edit'?PWE:PW,null);
+const setPw=(k,v)=>sync?db.doc(k==='edit'?'config/pwe':'config/pw').set(v):wr(k==='edit'?PWE:PW,v);
 const fail=e=>alert('保存できませんでした: '+e.message);
 const putProduct=p=>sync?db.collection('products').doc(p.id).set(p).catch(fail):save();
 const delProduct=id=>sync?db.collection('products').doc(id).delete().catch(fail):save();
@@ -358,7 +362,7 @@ async function migrate(){
   const b=db.batch();
   lp.forEach(p=>b.set(db.collection('products').doc(p.id),p));
   Object.keys(ls).forEach(k=>b.set(db.collection('sales').doc(k),ls[k]));
-  if(lpw&&!pwCache)b.set(db.doc('config/pw'),lpw);
+  if(lpw&&!pwCache.report)b.set(db.doc('config/pw'),lpw);
   try{await b.commit();alert('移しました。')}catch(e){fail(e)}
 }
 if(sync){
@@ -385,7 +389,7 @@ if(sync){
       salesCache={};q.forEach(d=>salesCache[d.id]=d.data());
       drawGlance();if(!$('#rep').hidden)renderRep();
     },fail));
-    unsubs.push(db.doc('config/pw').onSnapshot(d=>{pwCache=d.exists?d.data():null;pwLoaded=true},fail));
+    [['report','config/pw'],['edit','config/pwe']].forEach(([k,path])=>unsubs.push(db.doc(path).onSnapshot(d=>{pwCache[k]=d.exists?d.data():null;pwSeen[k]=true;pwLoaded=!!(pwSeen.report&&pwSeen.edit)},fail)));
   });
 }
 /* --- 一覧バー --- */
@@ -403,7 +407,7 @@ async function hash(pw,salt){
 }
 function showGate(){
   $('#gate').hidden=false;$('#rep').hidden=true;$('#pw').value='';$('#gerr').textContent='';
-  $('#gt').textContent=gateMode==='set'?'パスワードを決める(4文字以上)':'パスワードを入力';
+  $('#gt').textContent=(gateKind==='edit'?'編集用':'売上・在庫用')+(gateMode==='set'?'パスワードを決める(4文字以上)':'パスワードを入力');
   $('#gok').textContent=gateMode==='set'?'決定':'開く';
 }
 function renderRep(){
@@ -414,15 +418,14 @@ function renderRep(){
   $('#stock').innerHTML=products.map(p=>{const st=typeof p.stock==='number';return `<li><span>${esc(p.name)}</span><span class="${st&&p.stock===0?'short':''}">${st?(p.stock===0?'売り切れ':p.stock+'個'):'∞ 無限'}</span></li>`}).join('')||'<li class="none">商品がありません</li>';
   $('#days').innerHTML=Object.keys(s).sort().reverse().slice(0,14).map(d=>`<li><span>${d}</span><span>${yen(s[d].total)}</span></li>`).join('')||'<li class="none">記録がありません</li>';
 }
-let gateAction='report';
-function openGate(action){
+let gateKind='report',gateChange=false;
+function openGate(kind){
   if(!(window.crypto&&crypto.subtle)){alert('この環境ではパスワード機能が使えません。https のアドレスで開いてください。');return}
   if(sync&&!pwLoaded){alert('同期中です。数秒待ってからもう一度押してください。');return}
-  gateAction=action;gateMode=getPw()?'unlock':'set';
+  gateKind=kind;gateChange=false;gateMode=getPw(kind)?'unlock':'set';
   showGate();$('#adm').showModal();
 }
 $('#admBtn').onclick=()=>{
-  if(edit){gateAction='report';$('#gate').hidden=true;$('#rep').hidden=false;renderRep();$('#adm').showModal();return}
   openGate('report');
 };
 $('#gok').onclick=async()=>{
@@ -430,17 +433,19 @@ $('#gok').onclick=async()=>{
   if(gateMode==='set'){
     if(pw.length<4){$('#gerr').textContent='4文字以上にしてください。';return}
     const salt=Date.now()+'-'+Math.random();
-    await setPw({salt,h:await hash(pw,salt)});
+    await setPw(gateKind,{salt,h:await hash(pw,salt)});
   }else{
-    const saved=getPw();
+    const saved=getPw(gateKind);
     if(!saved||await hash(pw,saved.salt)!==saved.h){$('#gerr').textContent='パスワードが違います。';return}
   }
-  if(gateAction==='edit'){$('#adm').close();setEdit(true);return}
+  if(gateKind==='edit'&&!gateChange){$('#adm').close();setEdit(true);return}
+  gateChange=false;
   $('#gate').hidden=true;$('#rep').hidden=false;renderRep();
 };
 $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#gok').click()});
 $('#gcancel').onclick=$('#rclose').onclick=()=>$('#adm').close();
-$('#chpw').onclick=()=>{gateMode='set';showGate()};
+$('#chpw').onclick=()=>{gateKind='report';gateChange=true;gateMode='set';showGate()};
+$('#chpwe').onclick=()=>{gateKind='edit';gateChange=true;gateMode='set';showGate()};
 async function resetToday(){
   if(!confirm('今日の売上の記録を消します。在庫は元に戻りません。よろしいですか?'))return;
   const k=today();
