@@ -81,6 +81,10 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
 .chip b{margin-left:4px}
 .chip.low{border-color:var(--hi);background:var(--hi);color:var(--onhi)}
 .chip.zero{border-color:var(--danger);color:var(--danger)}
+.cats{display:flex;gap:6px;overflow-x:auto;padding:0 16px 8px}
+.cats[hidden]{display:none}
+.cat{flex:none;padding:6px 16px;border-radius:99px;border:1px solid var(--line);background:var(--panel);font-weight:700}
+.cat[aria-pressed=true]{background:var(--main);color:var(--onmain);border-color:var(--main)}
 @media (max-width:800px){
  .app{grid-template-columns:1fr;grid-template-rows:1fr auto}
  .cart{border-left:0;border-top:1px solid var(--line);max-height:52dvh}
@@ -108,6 +112,7 @@ const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411
       </div>
     </header>
     <div class="glance" id="glance"></div>
+    <div class="cats" id="cats" hidden></div>
     <div class="grid" id="grid"></div>
   </section>
 
@@ -137,6 +142,9 @@ const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411
   <input type="text" id="nm" maxlength="30">
   <label for="pr">値段(円)</label>
   <input type="number" id="pr" inputmode="numeric" min="0">
+  <label for="ct">ジャンル(例: ドリンク。空欄なら未分類)</label>
+  <input type="text" id="ct" list="ctl" maxlength="20">
+  <datalist id="ctl"></datalist>
   <label for="st">在庫数(空欄なら管理しない)</label>
   <input type="number" id="st" inputmode="numeric" min="0">
   <div class="row">
@@ -190,8 +198,9 @@ function shrink(file){return new Promise(res=>{const r=new FileReader();r.onload
 
 function drawGrid(){
   const g=$('#grid');g.classList.toggle('edit',edit);
+  const list=products.filter(inCat);
   let h=products.length?'':'<p class="empty">まだ商品がありません。「＋ 商品を追加」から写真と値段を登録しましょう。</p>';
-  h+=products.map(p=>{const st=typeof p.stock==='number';return `<button class="tile${st&&p.stock===0&&!edit?' out':''}" data-id="${p.id}">
+  h+=list.map(p=>{const st=typeof p.stock==='number';return `<button class="tile${st&&p.stock===0&&!edit?' out':''}" data-id="${p.id}">
     ${p.img?`<img class="ph" src="${p.img}" alt="">`:'<div class="noimg">🛒</div>'}
     ${!edit&&cart[p.id]?`<span class="badge">${cart[p.id]}</span>`:''}
     ${!edit&&st&&p.stock===0?'<span class="soldout">売り切れ</span>':''}
@@ -215,7 +224,7 @@ function drawChange(){
   if(paid<t){cl.textContent='不足';cv.textContent=yen(t-paid);cv.className='short'}
   else{cl.textContent='お釣り';cv.textContent=yen(paid-t)}
 }
-const redraw=()=>{drawGrid();drawCart();drawGlance()};
+const redraw=()=>{drawCats();drawGrid();drawCart();drawGlance()};
 
 $('#grid').addEventListener('click',e=>{
   if(e.target.closest('#addBtn'))return openDlg(null);
@@ -255,6 +264,8 @@ function openDlg(p){
   $('#dt').textContent=p?'商品を編集':'商品を追加';
   $('#nm').value=p?p.name:'';$('#pr').value=p?p.price:'';$('#file').value='';
   $('#st').value=p&&typeof p.stock==='number'?p.stock:'';
+  $('#ct').value=p?catOf(p):(cat.startsWith('c:')?cat.slice(2):'');
+  $('#ctl').innerHTML=[...new Set(products.map(catOf).filter(Boolean))].map(n=>`<option value="${esc(n)}">`).join('');
   $('#prev').src=img||'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
   $('#del').hidden=!p;
   $('#dlg').showModal();
@@ -266,7 +277,7 @@ $('#ok').onclick=()=>{
   if(!name||isNaN(price)||price<0){alert('商品名と値段を入力してください。');return}
   const sv=parseInt($('#st').value,10),stock=isNaN(sv)?null:Math.max(0,sv);
   const p=editing||{id:'p'+Date.now()};
-  Object.assign(p,{name,price,img,stock});
+  Object.assign(p,{name,price,img,stock,category:$('#ct').value.trim()});
   if(!editing)products.push(p);
   putProduct(p);$('#dlg').close();redraw();
 };
@@ -275,6 +286,19 @@ $('#del').onclick=()=>{
   const id=editing.id;products=products.filter(p=>p!==editing);delete cart[id];
   delProduct(id);$('#dlg').close();redraw();
 };
+/* --- ジャンル --- */
+let cat='all';
+const catOf=p=>(p.category||'').trim();
+const inCat=p=>cat==='all'||(cat==='none'?!catOf(p):'c:'+catOf(p)===cat);
+function drawCats(){
+  const names=[...new Set(products.map(catOf).filter(Boolean))];
+  const tabs=[['all','すべて'],...names.map(n=>['c:'+n,n])];
+  if(names.length&&products.some(p=>!catOf(p)))tabs.push(['none','未分類']);
+  if(!tabs.some(t=>t[0]===cat))cat='all';
+  const el=$('#cats');el.hidden=!names.length;
+  el.innerHTML=tabs.map(([k,l])=>`<button class="cat" data-c="${esc(k)}" aria-pressed="${k===cat}">${esc(l)}</button>`).join('');
+}
+$('#cats').addEventListener('click',e=>{const b=e.target.closest('.cat');if(!b)return;cat=b.dataset.c;drawCats();drawGrid()});
 /* --- 保存先(同期モード / この端末だけモード) --- */
 const sync=!!FB.apiKey&&!FB.apiKey.startsWith('ここに');
 let db,salesCache={},pwCache=null,pwLoaded=false,unsubs=[];
