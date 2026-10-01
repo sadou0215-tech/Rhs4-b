@@ -196,6 +196,7 @@ const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411
     <div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
       <button class="link" id="chpw">売上・在庫のパスワードを変更</button>
       <button class="link" id="chpwe">商品編集のパスワードを変更</button>
+      <button class="link" id="relock">ロックし直す(次回からパスワードが必要)</button>
     </div>
     <div class="row"><button class="ok" id="rclose">閉じる</button></div>
   </div>
@@ -407,6 +408,7 @@ function showGate(){
   $('#gate').hidden=false;$('#rep').hidden=true;$('#pw').value='';$('#gerr').textContent='';
   $('#gt').textContent=(gateKind==='edit'?'編集用':'売上・在庫用')+(gateMode==='set'?'パスワードを決める(4文字以上)':'パスワードを入力');
   $('#gok').textContent=gateMode==='set'?'決定':'開く';
+  updateLock();
 }
 function renderRep(){
   const s=getSales(),t=s[today()]||{total:0,count:0,items:{}};
@@ -417,10 +419,41 @@ function renderRep(){
   $('#days').innerHTML=Object.keys(s).sort().reverse().slice(0,14).map(d=>`<li><span>${d}</span><span>${yen(s[d].total)}</span></li>`).join('')||'<li class="none">記録がありません</li>';
 }
 let gateKind='report',gateChange=false;
+/* 1日1回パスワードを通したら、その端末ではその日は聞かない */
+const ukey=k=>'reji-unlock-'+(sync&&firebase.auth().currentUser?firebase.auth().currentUser.uid:'local')+'-'+k;
+const markUnlocked=(k,h)=>wr(ukey(k),{date:today(),h});
+function isUnlocked(k){const u=rd(ukey(k),null),sv=getPw(k);return !!(u&&sv&&u.date===today()&&u.h===sv.h)}
+/* 5回連続で間違えたら10分間ロック(この端末・パスワードの種類ごと) */
+const LOCK_N=5,LOCK_MS=10*60*1000,fkey=k=>'reji-fail-'+k;
+let lockTimer;
+const lockLeft=k=>{const f=rd(fkey(k),null);return f&&f.until>Date.now()?f.until-Date.now():0};
+const resetFail=k=>wr(fkey(k),{n:0,until:0});
+function failed(k){
+  const f=rd(fkey(k),{n:0}),n=(f.n||0)+1;
+  if(n>=LOCK_N){wr(fkey(k),{n:0,until:Date.now()+LOCK_MS});return 0}
+  wr(fkey(k),{n,until:0});return LOCK_N-n;
+}
+function updateLock(){
+  clearInterval(lockTimer);
+  let locked=false;
+  const tick=()=>{
+    const left=gateMode==='unlock'?lockLeft(gateKind):0;
+    $('#pw').disabled=$('#gok').disabled=left>0;
+    if(left>0){
+      locked=true;const t=Math.ceil(left/1000);
+      $('#gerr').textContent=`パスワードを${LOCK_N}回間違えました。あと${Math.floor(t/60)}分${String(t%60).padStart(2,'0')}秒たってから入力してください。`;
+    }else{clearInterval(lockTimer);if(locked){locked=false;$('#gerr').textContent=''}}
+  };
+  tick();lockTimer=setInterval(tick,1000);
+}
 function openGate(kind){
   if(!(window.crypto&&crypto.subtle)){alert('この環境ではパスワード機能が使えません。https のアドレスで開いてください。');return}
   if(sync&&!pwLoaded){alert('同期中です。数秒待ってからもう一度押してください。');return}
   gateKind=kind;gateChange=false;gateMode=getPw(kind)?'unlock':'set';
+  if(isUnlocked(kind)){
+    if(kind==='edit')return setEdit(true);
+    $('#gate').hidden=true;$('#rep').hidden=false;renderRep();return $('#adm').showModal();
+  }
   showGate();$('#adm').showModal();
 }
 $('#admBtn').onclick=()=>{
@@ -431,10 +464,17 @@ $('#gok').onclick=async()=>{
   if(gateMode==='set'){
     if(pw.length<4){$('#gerr').textContent='4文字以上にしてください。';return}
     const salt=Date.now()+'-'+Math.random();
-    await setPw(gateKind,{salt,h:await hash(pw,salt)});
+    const h=await hash(pw,salt);await setPw(gateKind,{salt,h});markUnlocked(gateKind,h);
   }else{
     const saved=getPw(gateKind);
-    if(!saved||await hash(pw,saved.salt)!==saved.h){$('#gerr').textContent='パスワードが違います。';return}
+    if(lockLeft(gateKind)){updateLock();return}
+    if(!saved||await hash(pw,saved.salt)!==saved.h){
+      const r=failed(gateKind);
+      if(r===0){$('#pw').value='';updateLock()}
+      else $('#gerr').textContent=`パスワードが違います。(あと${r}回間違えると10分間入力できなくなります)`;
+      return;
+    }
+    resetFail(gateKind);markUnlocked(gateKind,saved.h);
   }
   if(gateKind==='edit'&&!gateChange){$('#adm').close();setEdit(true);return}
   gateChange=false;
@@ -444,6 +484,7 @@ $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#gok').click()});
 $('#gcancel').onclick=$('#rclose').onclick=()=>$('#adm').close();
 $('#chpw').onclick=()=>{gateKind='report';gateChange=true;gateMode='set';showGate()};
 $('#chpwe').onclick=()=>{gateKind='edit';gateChange=true;gateMode='set';showGate()};
+$('#relock').onclick=()=>{try{['report','edit'].forEach(k=>localStorage.removeItem(ukey(k)))}catch(e){}if(edit)setEdit(false);$('#adm').close()};
 async function resetToday(){
   if(!confirm('今日の売上の記録を消します。在庫は元に戻りません。よろしいですか?'))return;
   const k=today();
@@ -451,7 +492,7 @@ async function resetToday(){
   const s=rd(SALES,{});delete s[k];wr(SALES,s);renderRep();drawGlance();
 }
 $('#resetToday').onclick=resetToday;
-$('#adm').addEventListener('close',()=>{$('#rep').hidden=true;$('#gate').hidden=false});
+$('#adm').addEventListener('close',()=>{clearInterval(lockTimer);$('#rep').hidden=true;$('#gate').hidden=false});
 redraw();
 </script>
 </body>
