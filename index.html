@@ -87,6 +87,8 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
 .cat{flex:none;padding:6px 16px;border-radius:99px;border:1px solid var(--line);background:var(--panel);font-weight:700}
 .cat[aria-pressed=true]{background:var(--main);color:var(--onmain);border-color:var(--main)}
 dialog input:disabled{opacity:.4}
+.mvs{position:absolute;left:8px;right:8px;top:8px;display:flex;justify-content:space-between;pointer-events:none}
+.mv{pointer-events:auto;width:42px;height:42px;border-radius:50%;background:var(--panel);color:var(--main);display:grid;place-items:center;font-weight:800;box-shadow:0 2px 6px #0005;cursor:pointer}
 @media (max-width:800px){
  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}
  .cart{border-left:0;border-top:1px solid var(--line);max-height:52dvh}
@@ -225,12 +227,13 @@ function shrink(file){return new Promise(res=>{const r=new FileReader();r.onload
 
 function drawGrid(){
   const g=$('#grid');g.classList.toggle('edit',edit);
-  const list=products.filter(inCat);
+  const list=[...products].sort(byOrder).filter(inCat);
   let h=products.length?'':'<p class="empty">まだ商品がありません。「商品を編集」から商品を追加してください。</p>';
-  h+=list.map(p=>{const st=typeof p.stock==='number';return `<button class="tile${st&&p.stock===0&&!edit?' out':''}" data-id="${p.id}">
+  h+=list.map((p,i)=>{const st=typeof p.stock==='number';return `<button class="tile${st&&p.stock===0&&!edit?' out':''}" data-id="${p.id}">
     ${p.img?`<img class="ph" src="${p.img}" alt="">`:'<div class="noimg">🛒</div>'}
     ${!edit&&cart[p.id]?`<span class="badge">${cart[p.id]}</span>`:''}
     ${!edit&&st&&p.stock===0?'<span class="soldout">売り切れ</span>':''}
+    ${edit?`<span class="mvs"><span class="mv" role="button" aria-label="前へ移動" data-mv="-1"${i===0?' style="visibility:hidden"':''}>◀</span><span class="mv" role="button" aria-label="後ろへ移動" data-mv="1"${i===list.length-1?' style="visibility:hidden"':''}>▶</span></span>`:''}
     <div class="info"><div class="nm">${esc(p.name)}</div><div class="pr">${yen(p.price)}${st&&p.stock>0?`<span class="left">残り${p.stock}</span>`:''}</div></div></button>`}).join('');
   if(edit)h+='<button class="add" id="addBtn">＋ 商品を追加</button>';
   g.innerHTML=h;
@@ -254,6 +257,8 @@ function drawChange(){
 const redraw=()=>{drawCats();drawGrid();drawCart();drawGlance()};
 
 $('#grid').addEventListener('click',e=>{
+  const m=e.target.closest('.mv');
+  if(m){moveProduct(m.closest('.tile').dataset.id,+m.dataset.mv);return}
   if(e.target.closest('#addBtn'))return openDlg(null);
   const t=e.target.closest('.tile');if(!t)return;
   const id=t.dataset.id;
@@ -319,6 +324,20 @@ $('#del').onclick=()=>{
   delProduct(id);$('#dlg').close();redraw();
 };
 $('#inf').onchange=()=>{$('#st').disabled=$('#inf').checked};
+/* --- 並べ替え(編集モードの ◀ ▶) --- */
+const byOrder=(a,b)=>((a.order??Infinity)-(b.order??Infinity))||(a.id<b.id?-1:1);
+function moveProduct(id,dir){
+  const all=[...products].sort(byOrder),vis=all.filter(inCat);
+  const i=vis.findIndex(p=>p.id===id),j=i+dir;
+  if(i<0||j<0||j>=vis.length)return;
+  const a=all.indexOf(vis[i]),b=all.indexOf(vis[j]);
+  [all[a],all[b]]=[all[b],all[a]];
+  const ch=[];
+  all.forEach((p,k)=>{if(p.order!==k){p.order=k;ch.push(p)}});
+  if(sync){const bt=db.batch();ch.forEach(p=>bt.update(db.collection('products').doc(p.id),{order:p.order}));bt.commit().catch(fail)}
+  else save();
+  drawGrid();
+}
 /* --- ジャンル --- */
 let cat='all';
 const catOf=p=>(p.category||'').trim();
