@@ -90,6 +90,11 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
 dialog input:disabled{opacity:.4}
 .mvs{position:absolute;left:8px;right:8px;top:8px;display:flex;justify-content:space-between;pointer-events:none}
 .mv{pointer-events:auto;width:42px;height:42px;border-radius:50%;background:var(--panel);color:var(--main);display:grid;place-items:center;font-weight:800;box-shadow:0 2px 6px #0005;cursor:pointer}
+.fr{font-style:normal;background:var(--hi);color:var(--onhi);border-radius:6px;padding:0 6px;font-size:.8rem;font-weight:700}
+dialog textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font:inherit;color:inherit;resize:vertical}
+dialog textarea:disabled{opacity:.4}
+.row.col{flex-direction:column}
+.row.col button{padding:14px;font-size:1.05rem}
 @media (max-width:800px){
  .app{grid-template-columns:minmax(0,1fr)}
  .cart{border-left:0;border-top:1px solid var(--line);top:auto;bottom:0;height:auto;max-height:52vh;max-height:52dvh;z-index:5}
@@ -168,6 +173,8 @@ const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411
   <label for="ct">ジャンル(例: ドリンク。空欄なら未分類)</label>
   <input type="text" id="ct" list="ctl" maxlength="20">
   <datalist id="ctl"></datalist>
+  <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:12px 0 4px"><input type="checkbox" id="af" style="width:auto"> 押したとき「有料 / 無料」を選ばせる</label>
+  <textarea id="an" rows="3" maxlength="200" placeholder="説明文(例: 景品と交換できる券です。有料ですか?無料ですか?)"></textarea>
   <label for="st">在庫数</label>
   <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:4px 0"><input type="checkbox" id="inf" style="width:auto"> 無限(在庫を数えない)</label>
   <input type="number" id="st" inputmode="numeric" min="0">
@@ -205,6 +212,16 @@ const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411
   </div>
 </dialog>
 
+<dialog id="ask">
+  <h2 id="askName" style="margin:0 0 8px;font-size:1.1rem"></h2>
+  <p id="askNote" style="white-space:pre-wrap;margin:0 0 4px"></p>
+  <div class="row col">
+    <button class="ok" id="askPaid"></button>
+    <button id="askFree">無料</button>
+    <button id="askBack">戻る</button>
+  </div>
+</dialog>
+
 <dialog id="login">
   <h2 style="margin:0 0 6px;font-size:1.1rem">レジにログイン</h2>
   <label for="em">メールアドレス</label>
@@ -220,7 +237,7 @@ const $=s=>document.querySelector(s);
 const yen=n=>'¥'+Number(n).toLocaleString('ja-JP');
 const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const KEY='reji-products-v1';
-let products=[],cart={},edit=false,editing=null,img='';
+let products=[],cart={},freeCart={},edit=false,editing=null,img='';
 try{products=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){}
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(products))}catch(e){alert('保存できませんでした。写真が多すぎるかもしれません。')}};
 
@@ -232,19 +249,21 @@ function drawGrid(){
   let h=products.length?'':'<p class="empty">まだ商品がありません。「商品を編集」から商品を追加してください。</p>';
   h+=list.map((p,i)=>{const st=typeof p.stock==='number';return `<button class="tile${st&&p.stock===0&&!edit?' out':''}" data-id="${p.id}">
     <div class="pic">${p.img?`<img class="ph" src="${p.img}" alt="">`:'<div class="noimg">🛒</div>'}</div>
-    ${!edit&&cart[p.id]?`<span class="badge">${cart[p.id]}</span>`:''}
+    ${!edit&&nq(p.id)?`<span class="badge">${nq(p.id)}</span>`:''}
     ${!edit&&st&&p.stock===0?'<span class="soldout">売り切れ</span>':''}
     ${edit?`<span class="mvs"><span class="mv" role="button" aria-label="前へ移動" data-mv="-1"${i===0?' style="visibility:hidden"':''}>◀</span><span class="mv" role="button" aria-label="後ろへ移動" data-mv="1"${i===list.length-1?' style="visibility:hidden"':''}>▶</span></span>`:''}
     <div class="info"><div class="nm">${esc(p.name)}</div><div class="pr">${yen(p.price)}${st&&p.stock>0?`<span class="left">残り${p.stock}</span>`:''}</div></div></button>`}).join('');
   if(edit)h+='<button class="add" id="addBtn">＋ 商品を追加</button>';
   g.innerHTML=h;
 }
+const nq=id=>(cart[id]||0)+(freeCart[id]||0);
 function total(){return products.reduce((s,p)=>s+p.price*(cart[p.id]||0),0)}
 function drawCart(){
-  const items=products.filter(p=>cart[p.id]);
-  $('#lines').innerHTML=items.length?items.map(p=>`<li><span>${esc(p.name)}</span>
-    <div class="qty"><button data-m="${p.id}" aria-label="減らす">−</button><b>${cart[p.id]}</b><button data-a="${p.id}" aria-label="増やす">＋</button></div>
-    <span class="amt">${yen(p.price*cart[p.id])}</span><span class="sub">${yen(p.price)}</span></li>`).join(''):'<li class="none">商品をタップすると追加されます</li>';
+  const items=products.filter(p=>nq(p.id));
+  const li=(p,q,free)=>`<li><span>${esc(p.name)}${free?' <em class="fr">無料</em>':''}</span>
+    <div class="qty"><button data-${free?'fm':'m'}="${p.id}" aria-label="減らす">−</button><b>${q}</b><button data-${free?'fa':'a'}="${p.id}" aria-label="増やす">＋</button></div>
+    <span class="amt">${free?yen(0):yen(p.price*q)}</span><span class="sub">${free?'無料':yen(p.price)}</span></li>`;
+  $('#lines').innerHTML=items.length?items.map(p=>(cart[p.id]?li(p,cart[p.id],false):'')+(freeCart[p.id]?li(p,freeCart[p.id],true):'')).join(''):'<li class="none">商品をタップすると追加されます</li>';
   $('#total').textContent=yen(total());
   drawChange();
 }
@@ -265,13 +284,17 @@ $('#grid').addEventListener('click',e=>{
   const id=t.dataset.id;
   if(edit)return openDlg(products.find(p=>p.id===id));
   const p=products.find(x=>x.id===id);
-  if(typeof p.stock==='number'&&(cart[id]||0)>=p.stock)return;
+  if(typeof p.stock==='number'&&nq(id)>=p.stock)return;
+  if(p.askFree)return openAsk(p);
   cart[id]=(cart[id]||0)+1;redraw();
 });
 $('#lines').addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
-  if(b.dataset.a){const p=products.find(x=>x.id===b.dataset.a);if(!(typeof p.stock==='number'&&cart[p.id]>=p.stock))cart[p.id]++}
+  const room=id=>{const p=products.find(x=>x.id===id);return !(typeof p.stock==='number'&&nq(id)>=p.stock)};
+  if(b.dataset.a&&room(b.dataset.a))cart[b.dataset.a]++;
+  if(b.dataset.fa&&room(b.dataset.fa))freeCart[b.dataset.fa]++;
   if(b.dataset.m&&--cart[b.dataset.m]<=0)delete cart[b.dataset.m];
+  if(b.dataset.fm&&--freeCart[b.dataset.fm]<=0)delete freeCart[b.dataset.fm];
   redraw();
 });
 function setEdit(v){edit=v;const b=$('#editBtn');b.setAttribute('aria-pressed',edit);b.textContent=edit?'編集をおわる':'商品を編集';drawGrid()}
@@ -281,14 +304,14 @@ document.querySelector('.paid').addEventListener('click',e=>{
   const p=e.target.dataset.p;if(!p)return;
   $('#paid').value=p==='exact'?total():p;drawChange();
 });
-const reset=()=>{cart={};$('#paid').value='';redraw()};
-$('#clear').onclick=()=>{if(!Object.keys(cart).length||confirm('お会計の内容を全部消しますか?'))reset()};
+const reset=()=>{cart={};freeCart={};$('#paid').value='';redraw()};
+$('#clear').onclick=()=>{if(!(Object.keys(cart).length+Object.keys(freeCart).length)||confirm('お会計の内容を全部消しますか?'))reset()};
 const SALES='reji-sales-v1',PW='reji-pw-v1',PWE='reji-pwe-v1';
 const rd=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
 const wr=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){alert('保存できませんでした。')}};
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 $('#done').onclick=()=>{
-  const items=products.filter(p=>cart[p.id]);
+  const items=products.filter(p=>nq(p.id));
   if(!items.length)return;
   const t=total(),pv=parseInt($('#paid').value,10);
   if(!isNaN(pv)&&pv<t){alert('お預かり金額が足りません。');return}
@@ -303,6 +326,7 @@ function openDlg(p){
   $('#nm').value=p?p.name:'';$('#pr').value=p?p.price:'';$('#file').value='';
   const unl=!(p&&typeof p.stock==='number');
   $('#inf').checked=unl;$('#st').disabled=unl;
+  $('#af').checked=!!(p&&p.askFree);$('#an').value=p&&p.note||'';$('#an').disabled=!$('#af').checked;
   $('#st').value=unl?'':p.stock;
   $('#ct').value=p?catOf(p):(cat.startsWith('c:')?cat.slice(2):'');
   $('#ctl').innerHTML=[...new Set(products.map(catOf).filter(Boolean))].map(n=>`<option value="${esc(n)}">`).join('');
@@ -319,16 +343,33 @@ $('#ok').onclick=()=>{
   if(!inf&&isNaN(sv)){alert('在庫数を入力するか、「無限」にチェックを入れてください。');return}
   const stock=inf?null:Math.max(0,sv);
   const p=editing||{id:'p'+Date.now()};
-  Object.assign(p,{name,price,img,stock,category:$('#ct').value.trim()});
+  Object.assign(p,{name,price,img,stock,category:$('#ct').value.trim(),askFree:$('#af').checked,note:$('#an').value.trim()});
   if(!editing)products.push(p);
   putProduct(p);$('#dlg').close();redraw();
 };
 $('#del').onclick=()=>{
   if(!confirm(`「${editing.name}」を削除しますか?`))return;
-  const id=editing.id;products=products.filter(p=>p!==editing);delete cart[id];
+  const id=editing.id;products=products.filter(p=>p!==editing);delete cart[id];delete freeCart[id];
   delProduct(id);$('#dlg').close();redraw();
 };
 $('#inf').onchange=()=>{$('#st').disabled=$('#inf').checked};
+$('#af').onchange=()=>{$('#an').disabled=!$('#af').checked};
+/* --- 有料 / 無料を選ぶ商品 --- */
+let askP=null;
+function openAsk(p){
+  askP=p;$('#askName').textContent=p.name;$('#askNote').textContent=p.note||'';
+  $('#askPaid').textContent='有料('+yen(p.price)+')';
+  $('#ask').showModal();
+}
+function addAsk(free){
+  const p=askP;$('#ask').close();
+  if(!p||(typeof p.stock==='number'&&nq(p.id)>=p.stock))return;
+  if(free)freeCart[p.id]=(freeCart[p.id]||0)+1;else cart[p.id]=(cart[p.id]||0)+1;
+  redraw();
+}
+$('#askPaid').onclick=()=>addAsk(false);
+$('#askFree').onclick=()=>addAsk(true);
+$('#askBack').onclick=()=>$('#ask').close();
 /* --- 並べ替え(編集モードの ◀ ▶) --- */
 const byOrder=(a,b)=>((a.order??Infinity)-(b.order??Infinity))||(a.id<b.id?-1:1);
 function moveProduct(id,dir){
@@ -369,15 +410,24 @@ function recordSale(items,paid,change){
   const k=today();
   if(!sync){
     const s=rd(SALES,{}),d=s[k]||(s[k]={total:0,paid:0,change:0,count:0,items:{}});
-    items.forEach(p=>{const q=cart[p.id],it=d.items[p.id]||(d.items[p.id]={name:p.name,qty:0,amt:0});it.qty+=q;it.amt+=p.price*q;if(typeof p.stock==='number')p.stock=Math.max(0,p.stock-q)});
+    items.forEach(p=>{
+      const q=cart[p.id]||0,f=freeCart[p.id]||0;
+      if(q){const it=d.items[p.id]||(d.items[p.id]={name:p.name,qty:0,amt:0});it.qty+=q;it.amt+=p.price*q}
+      if(f){const k2=p.id+'_free',it=d.items[k2]||(d.items[k2]={name:p.name+'(無料)',qty:0,amt:0});it.qty+=f}
+      if(typeof p.stock==='number')p.stock=Math.max(0,p.stock-q-f);
+    });
     d.paid=(d.paid??d.total)+paid;d.change=(d.change||0)+change;d.total+=paid-change;d.count++;
     wr(SALES,s);save();return;
   }
   const inc=firebase.firestore.FieldValue.increment,its={};
-  items.forEach(p=>{const q=cart[p.id];its[p.id]={name:p.name,qty:inc(q),amt:inc(p.price*q)}});
+  items.forEach(p=>{
+    const q=cart[p.id]||0,f=freeCart[p.id]||0;
+    if(q)its[p.id]={name:p.name,qty:inc(q),amt:inc(p.price*q)};
+    if(f)its[p.id+'_free']={name:p.name+'(無料)',qty:inc(f),amt:inc(0)};
+  });
   db.collection('sales').doc(k).set({total:inc(paid-change),paid:inc(paid),change:inc(change),count:inc(1),items:its},{merge:true}).catch(fail);
   const b=db.batch();let n=0;
-  items.forEach(p=>{if(typeof p.stock==='number'){b.update(db.collection('products').doc(p.id),{stock:inc(-cart[p.id])});n++}});
+  items.forEach(p=>{if(typeof p.stock==='number'){b.update(db.collection('products').doc(p.id),{stock:inc(-nq(p.id))});n++}});
   if(n)b.commit().catch(fail);
 }
 async function migrate(){
