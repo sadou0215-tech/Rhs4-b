@@ -97,6 +97,10 @@ dialog textarea{width:100%;padding:10px;border:1px solid var(--line);border-radi
 dialog textarea:disabled{opacity:.4}
 .row.col{flex-direction:column}
 .row.col button{padding:14px;font-size:1.05rem}
+#whoDlg ul{list-style:none;margin:0;padding:0}
+#whoDlg li{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line)}
+#whoDlg li span:first-child{overflow-wrap:anywhere}
+#whoDlg h3{margin:12px 0 4px;font-size:.95rem}
 @media (max-width:800px){
  .app{grid-template-columns:minmax(0,1fr)}
  .cart{border-left:0;border-top:1px solid var(--line);top:auto;bottom:0;height:auto;max-height:52vh;max-height:52dvh;z-index:5}
@@ -129,13 +133,15 @@ dialog textarea:disabled{opacity:.4}
 <script>
 /* ▼ Firebaseの設定をここに貼り付ける(空のままなら、この端末だけで動く従来モード) ▼ */
 const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411b4.firebaseapp.com",projectId:"rhs4b-411b4",appId:"1:631098519997:web:7e98522cb49fceaee3e2d4"};
+/* ▼ 「4Bレジ」を押してログイン情報を見られるメールアドレス(例: ["a@example.com","b@example.com"]) ▼ */
+const ADMIN_EMAILS=[];
 </script>
 </head>
 <body>
 <div class="app" id="app">
   <section class="shop">
     <header>
-      <h1>4Bレジ</h1>
+      <h1 id="title" role="button" tabindex="0" style="cursor:pointer;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent">4Bレジ</h1>
       <div style="display:flex;gap:8px">
         <button class="toggle" id="admBtn">🔒 売上・在庫</button>
         <button class="toggle" id="editBtn" aria-pressed="false">商品を編集</button>
@@ -224,6 +230,12 @@ const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411
     </div>
     <div class="row"><button class="ok" id="rclose">閉じる</button></div>
   </div>
+</dialog>
+
+<dialog id="whoDlg">
+  <h2 style="margin:0 0 4px;font-size:1.1rem">ログイン情報</h2>
+  <div id="whoBody"></div>
+  <div class="row"><button class="ok" id="whoClose">閉じる</button></div>
 </dialog>
 
 <dialog id="ask">
@@ -481,6 +493,32 @@ async function migrate(){
   if(lpw&&!pwCache.report)b.set(db.doc('config/pw'),lpw);
   try{await b.commit();alert('移しました。')}catch(e){fail(e)}
 }
+/* --- ログイン情報(許可したメールアドレスだけ) --- */
+let presenceCache={},beatTimer;
+const devId=(()=>{let d=rd('reji-dev',null);if(!d){d=Math.random().toString(36).slice(2,8);wr('reji-dev',d)}return d})();
+function beat(){
+  const u=sync&&firebase.auth().currentUser;if(!u)return;
+  db.doc('presence/'+devId).set({email:u.email||'不明',at:Date.now(),dev:devId}).catch(()=>{});
+}
+function openWho(){
+  const me=(sync&&firebase.auth().currentUser&&firebase.auth().currentUser.email)||'';
+  const allowed=ADMIN_EMAILS.map(x=>String(x).trim().toLowerCase()).filter(Boolean);
+  let h;
+  if(!sync)h='<p>この端末だけで使うモード(Firebase未設定)のため、ログイン情報はありません。</p>';
+  else if(!allowed.length)h='<p>ログイン情報を見られるメールアドレスが設定されていません。index.html の ADMIN_EMAILS に追加してください。</p>';
+  else if(!allowed.includes(me.toLowerCase()))h='<p>このアカウントでは、ログイン情報を表示できません。</p>';
+  else{
+    const now=Date.now(),list=Object.values(presenceCache).filter(x=>now-x.at<10*60*1000).sort((a,b)=>b.at-a.at);
+    h=`<h3>この端末</h3><p style="margin:0;overflow-wrap:anywhere">${esc(me)}</p>
+      <h3>ログイン中の端末(直近10分に動きがあったもの)</h3>
+      <ul>${list.map(x=>`<li><span>${esc(x.email)}${x.dev===devId?'(この端末)':''}</span><span>${Math.max(0,Math.round((now-x.at)/60000))}分前</span></li>`).join('')||'<li>なし</li>'}</ul>`;
+  }
+  $('#whoBody').innerHTML=h;$('#whoDlg').showModal();
+}
+$('#title').onclick=openWho;
+$('#title').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openWho()}});
+$('#whoClose').onclick=()=>$('#whoDlg').close();
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')beat()});
 if(sync){
   firebase.initializeApp(FB);
   db=firebase.firestore();
@@ -495,8 +533,9 @@ if(sync){
   $('#login').addEventListener('cancel',e=>e.preventDefault());
   firebase.auth().onAuthStateChanged(u=>{
     unsubs.forEach(f=>f());unsubs=[];
-    if(!u){products=[];redraw();if(!$('#login').open)$('#login').showModal();return}
+    if(!u){clearInterval(beatTimer);products=[];redraw();if(!$('#login').open)$('#login').showModal();return}
     if($('#login').open)$('#login').close();
+    beat();clearInterval(beatTimer);beatTimer=setInterval(beat,60000);
     unsubs.push(db.collection('products').onSnapshot(q=>{
       products=q.docs.map(d=>{const x=d.data();if(typeof x.stock==='number')x.stock=Math.max(0,x.stock);return{...x,id:d.id}}).sort((a,b)=>a.id<b.id?-1:1);
       redraw();
@@ -507,6 +546,7 @@ if(sync){
     },fail));
     unsubs.push(db.doc('config/drawer').onSnapshot(d=>{drawerCache=d.exists?d.data():null;if(!$('#rep').hidden)renderRep()},fail));
   unsubs.push(db.collection('drawerLog').orderBy('at','desc').limit(30).onSnapshot(q=>{logCache=q.docs.map(d=>d.data());if(!$('#rep').hidden)renderRep()},fail));
+  unsubs.push(db.collection('presence').onSnapshot(q=>{presenceCache={};q.forEach(d=>presenceCache[d.id]=d.data())},()=>{}));
   [['report','config/pw'],['edit','config/pwe']].forEach(([k,path])=>unsubs.push(db.doc(path).onSnapshot(d=>{pwCache[k]=d.exists?d.data():null;pwSeen[k]=true;pwLoaded=!!(pwSeen.report&&pwSeen.edit)},fail)));
   });
 }
