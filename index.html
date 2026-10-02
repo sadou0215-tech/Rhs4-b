@@ -67,7 +67,8 @@ dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border
 .left{color:var(--sub);font-size:.85rem;margin-left:6px}
 #adm{max-height:88dvh}
 #adm ul{list-style:none;margin:0 0 8px;padding:0}
-#adm li{display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line)}
+#adm li{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line)}
+#adm li span:first-child{overflow-wrap:anywhere}
 #adm h3{margin:16px 0 4px;font-size:.95rem}
 #adm input{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
 .big{font-size:2.2rem;font-weight:800}
@@ -198,6 +199,8 @@ const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411
     <div id="tcount" style="color:var(--sub)"></div>
     <button class="link" id="resetToday" style="color:var(--danger)">今日の売上をリセット</button>
     <ul id="sold"></ul>
+    <h3>ログイン別の売上(今日)</h3>
+    <ul id="byw"></ul>
     <h3>在庫</h3>
     <ul id="stock"></ul>
     <h3>日別の売上(新しい順)</h3>
@@ -406,8 +409,9 @@ const setPw=(k,v)=>sync?db.doc(k==='edit'?'config/pwe':'config/pw').set(v):wr(k=
 const fail=e=>alert('保存できませんでした: '+e.message);
 const putProduct=p=>sync?db.collection('products').doc(p.id).set(p).catch(fail):save();
 const delProduct=id=>sync?db.collection('products').doc(id).delete().catch(fail):save();
+const who=()=>(sync&&firebase.auth().currentUser&&firebase.auth().currentUser.email)||(sync?'不明':'この端末(ログインなし)');
 function recordSale(items,paid,change){
-  const k=today();
+  const k=today(),em=who(),ek=em.replace(/\./g,'%2E');
   if(!sync){
     const s=rd(SALES,{}),d=s[k]||(s[k]={total:0,paid:0,change:0,count:0,items:{}});
     items.forEach(p=>{
@@ -417,6 +421,7 @@ function recordSale(items,paid,change){
       if(typeof p.stock==='number')p.stock=Math.max(0,p.stock-q-f);
     });
     d.paid=(d.paid??d.total)+paid;d.change=(d.change||0)+change;d.total+=paid-change;d.count++;
+    d.byEmail=d.byEmail||{};const be=d.byEmail[ek]||(d.byEmail[ek]={email:em,total:0,count:0});be.total+=paid-change;be.count++;
     wr(SALES,s);save();return;
   }
   const inc=firebase.firestore.FieldValue.increment,its={};
@@ -425,7 +430,7 @@ function recordSale(items,paid,change){
     if(q)its[p.id]={name:p.name,qty:inc(q),amt:inc(p.price*q)};
     if(f)its[p.id+'_free']={name:p.name+'(無料)',qty:inc(f),amt:inc(0)};
   });
-  db.collection('sales').doc(k).set({total:inc(paid-change),paid:inc(paid),change:inc(change),count:inc(1),items:its},{merge:true}).catch(fail);
+  db.collection('sales').doc(k).set({total:inc(paid-change),paid:inc(paid),change:inc(change),count:inc(1),items:its,byEmail:{[ek]:{email:em,total:inc(paid-change),count:inc(1)}}},{merge:true}).catch(fail);
   const b=db.batch();let n=0;
   items.forEach(p=>{if(typeof p.stock==='number'){b.update(db.collection('products').doc(p.id),{stock:inc(-nq(p.id))});n++}});
   if(n)b.commit().catch(fail);
@@ -490,6 +495,8 @@ function renderRep(){
   const pd=t.paid??t.total,cg=t.change??0;
   $('#tcount').innerHTML=`${t.count}件の会計<br>お預かり合計 ${yen(pd)} − お釣り合計 ${yen(cg)}`;
   $('#sold').innerHTML=Object.values(t.items).map(i=>`<li><span>${esc(i.name)} × ${i.qty}</span><span>${yen(i.amt)}</span></li>`).join('')||'<li class="none">まだ売上がありません</li>';
+  const be=Object.values(t.byEmail||{}),sum=be.reduce((a,x)=>a+x.total,0),rest=t.total-sum;
+  $('#byw').innerHTML=be.map(x=>`<li><span>${esc(x.email)}</span><span>${yen(x.total)}(${x.count}件)</span></li>`).join('')+(rest>0&&t.count?`<li><span>メールアドレス不明(記録開始前の分)</span><span>${yen(rest)}</span></li>`:'')||'<li class="none">まだ売上がありません</li>';
   $('#stock').innerHTML=products.map(p=>{const st=typeof p.stock==='number';return `<li><span>${esc(p.name)}</span><span class="${st&&p.stock===0?'short':''}">${st?(p.stock===0?'売り切れ':p.stock+'個'):'∞ 無限'}</span></li>`}).join('')||'<li class="none">商品がありません</li>';
   $('#days').innerHTML=Object.keys(s).sort().reverse().slice(0,14).map(d=>`<li><span>${d}</span><span>${yen(s[d].total)}</span></li>`).join('')||'<li class="none">記録がありません</li>';
 }
