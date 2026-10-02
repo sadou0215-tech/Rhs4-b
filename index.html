@@ -198,12 +198,22 @@ const FB={apiKey:"AIzaSyDPCLcgX5oCT26ElHdWavLQLqsnn-VBzNc",authDomain:"rhs4b-411
     <h2 style="margin:0;font-size:1.1rem">今日の売上</h2>
     <div class="big" id="today"></div>
     <div id="tcount" style="color:var(--sub)"></div>
+    <div style="margin:10px 0 2px;padding:10px 12px;border:1px solid var(--line);border-radius:12px">
+      <div style="color:var(--sub);font-size:.85rem">レジの合計金額</div>
+      <div class="big" id="drawer" style="font-size:1.8rem"></div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px 14px">
+        <button class="link" id="setDrawer">金額を入力し直す</button>
+        <button class="link" id="adjDrawer">増減で修正する(＋/−)</button>
+      </div>
+    </div>
     <button class="link" id="resetToday" style="color:var(--danger)">今日の売上をリセット</button>
     <ul id="sold"></ul>
     <h3>ログイン別の売上(今日)</h3>
     <ul id="byw"></ul>
     <h3>在庫</h3>
     <ul id="stock"></ul>
+    <h3>レジの金額の変更履歴</h3>
+    <ul id="dlog"></ul>
     <h3>日別の売上(新しい順)</h3>
     <ul id="days"></ul>
     <button class="link" id="migrate" hidden>この端末のデータをクラウドへ移す(初回のみ)</button>
@@ -419,6 +429,21 @@ const fail=e=>alert('保存できませんでした: '+e.message);
 const putProduct=p=>sync?db.collection('products').doc(p.id).set(p).catch(fail):save();
 const delProduct=id=>sync?db.collection('products').doc(id).delete().catch(fail):save();
 const who=()=>(sync&&firebase.auth().currentUser&&firebase.auth().currentUser.email)||(sync?'不明':'この端末(ログインなし)');
+const DRW='reji-drawer-v1',DRWL='reji-drawerlog-v1';
+let drawerCache=null,logCache=[];
+const getLog=()=>sync?logCache:rd(DRWL,[]);
+const getDrawer=()=>sync?drawerCache:rd(DRW,null);
+function logDrawer(type,before,after,delta){
+  const e={at:Date.now(),email:who(),type,before,after,delta};
+  if(sync)return db.collection('drawerLog').add(e).catch(fail);
+  const L=rd(DRWL,[]);L.unshift(e);wr(DRWL,L.slice(0,200));
+}
+function setDrawer(v){
+  const d0=getDrawer(),before=d0&&d0.set?d0.balance:null;
+  logDrawer('set',before,v,before==null?null:v-before);
+  if(sync)return db.doc('config/drawer').set({balance:v,set:true}).catch(fail);
+  wr(DRW,{balance:v,set:true});renderRep();
+}
 function recordSale(items,paid,change){
   const k=today(),em=who(),ek=em.replace(/\./g,'%2E');
   if(!sync){
@@ -431,6 +456,7 @@ function recordSale(items,paid,change){
     });
     d.paid=(d.paid??d.total)+paid;d.change=(d.change||0)+change;d.total+=paid-change;d.count++;
     d.byEmail=d.byEmail||{};const be=d.byEmail[ek]||(d.byEmail[ek]={email:em,total:0,count:0});be.total+=paid-change;be.count++;
+    const dr=rd(DRW,{balance:0,set:false});dr.balance+=paid-change;wr(DRW,dr);
     wr(SALES,s);save();return;
   }
   const inc=firebase.firestore.FieldValue.increment,its={};
@@ -440,6 +466,7 @@ function recordSale(items,paid,change){
     if(f)its[p.id+'_free']={name:p.name+'(無料)',qty:inc(f),amt:inc(0)};
   });
   db.collection('sales').doc(k).set({total:inc(paid-change),paid:inc(paid),change:inc(change),count:inc(1),items:its,byEmail:{[ek]:{email:em,total:inc(paid-change),count:inc(1)}}},{merge:true}).catch(fail);
+  db.doc('config/drawer').set({balance:inc(paid-change)},{merge:true}).catch(fail);
   const b=db.batch();let n=0;
   items.forEach(p=>{if(typeof p.stock==='number'){b.update(db.collection('products').doc(p.id),{stock:inc(-nq(p.id))});n++}});
   if(n)b.commit().catch(fail);
@@ -478,7 +505,9 @@ if(sync){
       salesCache={};q.forEach(d=>salesCache[d.id]=d.data());
       drawGlance();if(!$('#rep').hidden)renderRep();
     },fail));
-    [['report','config/pw'],['edit','config/pwe']].forEach(([k,path])=>unsubs.push(db.doc(path).onSnapshot(d=>{pwCache[k]=d.exists?d.data():null;pwSeen[k]=true;pwLoaded=!!(pwSeen.report&&pwSeen.edit)},fail)));
+    unsubs.push(db.doc('config/drawer').onSnapshot(d=>{drawerCache=d.exists?d.data():null;if(!$('#rep').hidden)renderRep()},fail));
+  unsubs.push(db.collection('drawerLog').orderBy('at','desc').limit(30).onSnapshot(q=>{logCache=q.docs.map(d=>d.data());if(!$('#rep').hidden)renderRep()},fail));
+  [['report','config/pw'],['edit','config/pwe']].forEach(([k,path])=>unsubs.push(db.doc(path).onSnapshot(d=>{pwCache[k]=d.exists?d.data():null;pwSeen[k]=true;pwLoaded=!!(pwSeen.report&&pwSeen.edit)},fail)));
   });
 }
 /* --- 一覧バー --- */
@@ -501,8 +530,14 @@ function showGate(){
 function renderRep(){
   const s=getSales(),t=s[today()]||{total:0,count:0,items:{}};
   $('#today').textContent=yen(t.total);
-  const pd=t.paid??t.total,cg=t.change??0;
-  $('#tcount').innerHTML=`${t.count}件の会計<br>お預かり合計 ${yen(pd)} − お釣り合計 ${yen(cg)}`;
+  $('#tcount').textContent=t.count+'件の会計';
+  const dr=getDrawer();$('#drawer').textContent=dr&&dr.set?yen(dr.balance):'未設定';
+  const f2=n=>String(n).padStart(2,'0');
+  $('#dlog').innerHTML=getLog().slice(0,30).map(e=>{
+    const d=new Date(e.at);
+    const tx=e.type==='adj'?`${e.delta>0?'+':'−'}${yen(Math.abs(e.delta))}(${yen(e.before)} → ${yen(e.after)})`:(e.before==null?`設定 ${yen(e.after)}`:`入力し直し ${yen(e.before)} → ${yen(e.after)}`);
+    return `<li><span>${d.getMonth()+1}/${d.getDate()} ${f2(d.getHours())}:${f2(d.getMinutes())}<br>${esc(e.email||'不明')}</span><span style="text-align:right">${tx}</span></li>`;
+  }).join('')||'<li class="none">まだ変更の履歴はありません</li>';
   $('#sold').innerHTML=Object.values(t.items).map(i=>`<li><span>${esc(i.name)} × ${i.qty}</span><span>${yen(i.amt)}</span></li>`).join('')||'<li class="none">まだ売上がありません</li>';
   const be=Object.values(t.byEmail||{}),sum=be.reduce((a,x)=>a+x.total,0),rest=t.total-sum;
   $('#byw').innerHTML=be.map(x=>`<li><span>${esc(x.email)}</span><span>${yen(x.total)}(${x.count}件)</span></li>`).join('')+(rest>0&&t.count?`<li><span>メールアドレス不明(記録開始前の分)</span><span>${yen(rest)}</span></li>`:'')||'<li class="none">まだ売上がありません</li>';
@@ -583,6 +618,33 @@ async function resetToday(){
   const s=rd(SALES,{});delete s[k];wr(SALES,s);renderRep();drawGlance();
 }
 $('#resetToday').onclick=resetToday;
+$('#setDrawer').onclick=()=>{
+  const dr=getDrawer(),cur=dr&&dr.set?dr.balance:'';
+  const v=prompt('いまレジに入っている金額(円)を入力してください。この金額に、これからの売上が足されていきます。',cur);
+  if(v===null)return;
+  const n=parseInt(String(v).replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/[,，\s]/g,''),10);
+  if(isNaN(n)||n<0){alert('0以上の数字で入力してください。');return}
+  if(dr&&dr.set&&!confirm(`レジの金額を ${yen(dr.balance)} → ${yen(n)} に変更します。よろしいですか?`))return;
+  setDrawer(n);
+};
+function adjDrawer(n){
+  const d0=getDrawer(),before=d0.balance;
+  logDrawer('adj',before,before+n,n);
+  if(sync)return db.doc('config/drawer').set({balance:firebase.firestore.FieldValue.increment(n),set:true},{merge:true}).catch(fail);
+  const dr=rd(DRW,{balance:0,set:true});dr.balance+=n;dr.set=true;wr(DRW,dr);renderRep();
+}
+$('#adjDrawer').onclick=()=>{
+  const dr=getDrawer();
+  if(!(dr&&dr.set)){alert('先に「金額を入力し直す」で、レジの金額を設定してください。');return}
+  const v=prompt('増減の金額を入力してください。\n増やすときは「+500」、減らすときは「-300」のように入力します。');
+  if(v===null)return;
+  const norm=String(v).replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/＋/g,'+').replace(/[−ー－―]/g,'-').replace(/[,，\s円]/g,'');
+  const n=parseInt(norm,10);
+  if(isNaN(n)||n===0){alert('「+500」や「-300」のように入力してください。');return}
+  if(dr.balance+n<0){alert('レジの金額がマイナスになるため、変更できません。');return}
+  if(!confirm(`レジの金額を ${yen(dr.balance)} → ${yen(dr.balance+n)} に変更します。よろしいですか?`))return;
+  adjDrawer(n);
+};
 $('#adm').addEventListener('close',()=>{clearInterval(lockTimer);$('#rep').hidden=true;$('#gate').hidden=false});
 redraw();
 </script>
