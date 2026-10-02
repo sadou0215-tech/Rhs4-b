@@ -51,6 +51,7 @@ h1{font-size:1.25rem;margin:0}
 .paid button{flex:1;padding:6px 4px;border:1px solid var(--line);background:var(--bg);border-radius:8px}
 .change{display:flex;justify-content:space-between;font-size:1.15rem;font-weight:700;margin-bottom:10px;min-height:1.7em}
 .short{color:var(--danger)}
+.done:disabled{opacity:.45;cursor:not-allowed}
 .done{width:100%;padding:12px;border:0;border-radius:12px;background:var(--main);color:var(--onmain);font-weight:800;font-size:1.05rem}
 .link{background:none;border:0;color:var(--sub);text-decoration:underline;font-size:.85rem}
 dialog{border:0;border-radius:16px;padding:20px;width:min(92vw,380px);max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);overflow-y:auto;background:var(--panel);color:var(--ink)}
@@ -270,7 +271,14 @@ function drawCart(){
   $('#total').textContent=yen(total());
   drawChange();
 }
+function updateDone(){
+  const b=$('#done'),n=Object.keys(cart).length+Object.keys(freeCart).length,pv=parseInt($('#paid').value,10);
+  const need=n>0&&total()>0&&isNaN(pv);
+  b.disabled=need;
+  b.textContent=need?'お預かり金額を入力してください':'会計をおわる';
+}
 function drawChange(){
+  updateDone();
   const paid=parseInt($('#paid').value,10),t=total(),cl=$('#cl'),cv=$('#cv');
   cv.className='';
   if(isNaN(paid)||!t){cl.textContent='お釣り';cv.textContent='';return}
@@ -318,9 +326,10 @@ $('#done').onclick=()=>{
   if(!items.length)return;
   const t=total(),pv=parseInt($('#paid').value,10);
   if(!isNaN(pv)&&pv<t){alert('お預かり金額が足りません。');return}
+  if(isNaN(pv)&&t>0)return;
   const paid=isNaN(pv)?t:pv;
   recordSale(items,paid,paid-t);reset();
-  const b=$('#done');b.textContent='記録しました';setTimeout(()=>b.textContent='会計をおわる',1500);
+  const b=$('#done');b.textContent='記録しました';setTimeout(updateDone,1500);
 };
 
 function openDlg(p){
