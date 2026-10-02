@@ -22,7 +22,7 @@ h1{font-size:1.25rem;margin:0}
 .grid{flex:1;overflow:auto;padding:4px 16px 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;align-content:start}
 .tile{position:relative;border:0;padding:0;background:var(--panel);border-radius:14px;overflow:hidden;text-align:left;box-shadow:0 1px 0 var(--line),0 0 0 1px var(--line);transition:transform .08s}
 .tile:active{transform:scale(.96)}
-.tile .ph{aspect-ratio:1;width:100%;object-fit:cover;display:block;background:var(--line)}
+.tile .ph{aspect-ratio:1;width:100%;object-fit:contain;object-position:center;display:block;background:#fff}
 .tile .noimg{aspect-ratio:1;display:grid;place-items:center;font-size:2.4rem;color:var(--sub);background:var(--line)}
 .tile .info{padding:8px 10px 10px}
 .tile .nm{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -56,7 +56,7 @@ dialog{border:0;border-radius:16px;padding:20px;width:min(92vw,380px);max-height
 dialog::backdrop{background:#0008}
 dialog label{display:block;margin:10px 0 4px;font-weight:700;font-size:.9rem}
 dialog input[type=text],dialog input[type=number]{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
-.prev{width:120px;height:120px;border-radius:12px;object-fit:cover;background:var(--line);display:block;margin-bottom:8px}
+.prev{width:120px;height:120px;border-radius:12px;object-fit:contain;background:#fff;border:1px solid var(--line);display:block;margin-bottom:8px}
 .row{display:flex;gap:8px;margin-top:16px}
 .row button{flex:1;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);font-weight:700}
 .row .ok{background:var(--main);color:var(--onmain);border-color:var(--main)}
