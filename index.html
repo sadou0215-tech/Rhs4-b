@@ -290,7 +290,11 @@ const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth
 $('#done').onclick=()=>{
   const items=products.filter(p=>cart[p.id]);
   if(!items.length)return;
-  recordSale(items);reset();
+  const t=total(),pv=parseInt($('#paid').value,10);
+  if(!isNaN(pv)&&pv<t){alert('お預かり金額が足りません。');return}
+  const paid=isNaN(pv)?t:pv;
+  recordSale(items,paid,paid-t);reset();
+  const b=$('#done');b.textContent='記録しました';setTimeout(()=>b.textContent='会計をおわる',1500);
 };
 
 function openDlg(p){
@@ -361,20 +365,20 @@ const setPw=(k,v)=>sync?db.doc(k==='edit'?'config/pwe':'config/pw').set(v):wr(k=
 const fail=e=>alert('保存できませんでした: '+e.message);
 const putProduct=p=>sync?db.collection('products').doc(p.id).set(p).catch(fail):save();
 const delProduct=id=>sync?db.collection('products').doc(id).delete().catch(fail):save();
-function recordSale(items){
+function recordSale(items,paid,change){
   const k=today();
   if(!sync){
-    const s=rd(SALES,{}),d=s[k]||(s[k]={total:0,count:0,items:{}});
-    items.forEach(p=>{const q=cart[p.id],it=d.items[p.id]||(d.items[p.id]={name:p.name,qty:0,amt:0});it.qty+=q;it.amt+=p.price*q;d.total+=p.price*q;if(typeof p.stock==='number')p.stock=Math.max(0,p.stock-q)});
-    d.count++;wr(SALES,s);save();return;
+    const s=rd(SALES,{}),d=s[k]||(s[k]={total:0,paid:0,change:0,count:0,items:{}});
+    items.forEach(p=>{const q=cart[p.id],it=d.items[p.id]||(d.items[p.id]={name:p.name,qty:0,amt:0});it.qty+=q;it.amt+=p.price*q;if(typeof p.stock==='number')p.stock=Math.max(0,p.stock-q)});
+    d.paid=(d.paid??d.total)+paid;d.change=(d.change||0)+change;d.total+=paid-change;d.count++;
+    wr(SALES,s);save();return;
   }
-  const inc=firebase.firestore.FieldValue.increment,b=db.batch(),its={};let tot=0;
-  items.forEach(p=>{
-    const q=cart[p.id];its[p.id]={name:p.name,qty:inc(q),amt:inc(p.price*q)};tot+=p.price*q;
-    if(typeof p.stock==='number')b.update(db.collection('products').doc(p.id),{stock:inc(-q)});
-  });
-  b.set(db.collection('sales').doc(k),{total:inc(tot),count:inc(1),items:its},{merge:true});
-  b.commit().catch(fail);
+  const inc=firebase.firestore.FieldValue.increment,its={};
+  items.forEach(p=>{const q=cart[p.id];its[p.id]={name:p.name,qty:inc(q),amt:inc(p.price*q)}});
+  db.collection('sales').doc(k).set({total:inc(paid-change),paid:inc(paid),change:inc(change),count:inc(1),items:its},{merge:true}).catch(fail);
+  const b=db.batch();let n=0;
+  items.forEach(p=>{if(typeof p.stock==='number'){b.update(db.collection('products').doc(p.id),{stock:inc(-cart[p.id])});n++}});
+  if(n)b.commit().catch(fail);
 }
 async function migrate(){
   const lp=rd(KEY,[]),ls=rd(SALES,{}),lpw=rd(PW,null);
@@ -433,7 +437,8 @@ function showGate(){
 function renderRep(){
   const s=getSales(),t=s[today()]||{total:0,count:0,items:{}};
   $('#today').textContent=yen(t.total);
-  $('#tcount').textContent=t.count+'件の会計';
+  const pd=t.paid??t.total,cg=t.change??0;
+  $('#tcount').innerHTML=`${t.count}件の会計<br>お預かり合計 ${yen(pd)} − お釣り合計 ${yen(cg)}`;
   $('#sold').innerHTML=Object.values(t.items).map(i=>`<li><span>${esc(i.name)} × ${i.qty}</span><span>${yen(i.amt)}</span></li>`).join('')||'<li class="none">まだ売上がありません</li>';
   $('#stock').innerHTML=products.map(p=>{const st=typeof p.stock==='number';return `<li><span>${esc(p.name)}</span><span class="${st&&p.stock===0?'short':''}">${st?(p.stock===0?'売り切れ':p.stock+'個'):'∞ 無限'}</span></li>`}).join('')||'<li class="none">商品がありません</li>';
   $('#days').innerHTML=Object.keys(s).sort().reverse().slice(0,14).map(d=>`<li><span>${d}</span><span>${yen(s[d].total)}</span></li>`).join('')||'<li class="none">記録がありません</li>';
