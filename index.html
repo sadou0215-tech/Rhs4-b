@@ -8,22 +8,23 @@
 :root{--bg:#eef2f1;--panel:#fff;--ink:#1a2a29;--sub:#5d706e;--line:#d5dedc;--main:#0f5b57;--onmain:#fff;--hi:#f2c230;--onhi:#2a2100;--danger:#b3261e}
 @media (prefers-color-scheme:dark){:root{--bg:#101817;--panel:#182322;--ink:#e8f0ef;--sub:#93a8a5;--line:#2b3b39;--main:#4fb3ab;--onmain:#06201e;--danger:#ff8a80}}
 *{box-sizing:border-box}
-html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
-body{background:var(--bg);color:var(--ink);font:16px/1.5 "Hiragino Maru Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif}
+html,body{margin:0}
+body{overflow-x:hidden;background:var(--bg);color:var(--ink);font:16px/1.5 "Hiragino Maru Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif}
 button,input{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:3px solid var(--hi);outline-offset:2px}
-.app{height:100vh;height:100dvh;width:100%;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) 360px;grid-template-rows:minmax(0,1fr)}
+.app{width:100%;min-height:100vh;min-height:100dvh;display:grid;grid-template-columns:minmax(0,1fr) 360px;align-items:start}
 .shop{display:flex;flex-direction:column;min-height:0;min-width:0}
 header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:12px 16px}
 h1{font-size:1.25rem;margin:0}
 .toggle{border:2px solid var(--main);background:none;color:var(--main);border-radius:99px;padding:6px 16px;font-weight:700}
 .toggle[aria-pressed=true]{background:var(--main);color:var(--onmain)}
-.grid{flex:1;overflow:auto;padding:4px 16px 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;align-content:start}
-.tile{position:relative;border:0;padding:0;background:var(--panel);border-radius:14px;overflow:hidden;text-align:left;box-shadow:0 1px 0 var(--line),0 0 0 1px var(--line);transition:transform .08s}
+.grid{padding:4px 16px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;align-content:start;grid-auto-rows:max-content}
+.tile{display:block;align-self:start;position:relative;border:0;padding:0;background:var(--panel);border-radius:14px;overflow:hidden;text-align:left;box-shadow:0 1px 0 var(--line),0 0 0 1px var(--line);transition:transform .08s}
 .tile:active{transform:scale(.96)}
-.tile .ph{aspect-ratio:1;width:100%;object-fit:contain;object-position:center;display:block;background:#fff}
-.tile .noimg{aspect-ratio:1;display:grid;place-items:center;font-size:2.4rem;color:var(--sub);background:var(--line)}
+.tile .pic{position:relative;width:100%;aspect-ratio:1;background:#fff;overflow:hidden}
+.tile .ph{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;display:block;background:#fff}
+.tile .noimg{position:absolute;inset:0;display:grid;place-items:center;font-size:2.4rem;color:var(--sub);background:var(--line)}
 .tile .info{padding:8px 10px 10px}
 .tile .nm{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tile .pr{color:var(--sub)}
@@ -31,7 +32,7 @@ h1{font-size:1.25rem;margin:0}
 .edit .tile{outline:2px dashed var(--main);outline-offset:-2px}
 .add{display:grid;place-items:center;min-height:170px;border:2px dashed var(--main);background:none;color:var(--main);font-weight:700;border-radius:14px}
 .empty{grid-column:1/-1;color:var(--sub);margin:0 0 4px}
-.cart{background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;min-width:0;overflow-y:auto}
+.cart{position:sticky;top:0;height:100vh;height:100dvh;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;min-width:0;overflow-y:auto}
 .cart h2{margin:0;padding:12px 16px;font-size:1rem;display:flex;justify-content:space-between;align-items:center}
 .lines{flex:1;overflow:auto;margin:0;padding:0 16px;list-style:none;min-height:60px}
 .lines li>span:first-child{overflow-wrap:anywhere}
@@ -90,8 +91,8 @@ dialog input:disabled{opacity:.4}
 .mvs{position:absolute;left:8px;right:8px;top:8px;display:flex;justify-content:space-between;pointer-events:none}
 .mv{pointer-events:auto;width:42px;height:42px;border-radius:50%;background:var(--panel);color:var(--main);display:grid;place-items:center;font-weight:800;box-shadow:0 2px 6px #0005;cursor:pointer}
 @media (max-width:800px){
- .app{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}
- .cart{border-left:0;border-top:1px solid var(--line);max-height:52dvh}
+ .app{grid-template-columns:minmax(0,1fr)}
+ .cart{border-left:0;border-top:1px solid var(--line);top:auto;bottom:0;height:auto;max-height:52vh;max-height:52dvh;z-index:5}
  .lines{max-height:16dvh}
  .total output{font-size:1.6rem}
  .toggle{padding:5px 12px;font-size:.9rem}
@@ -230,7 +231,7 @@ function drawGrid(){
   const list=[...products].sort(byOrder).filter(inCat);
   let h=products.length?'':'<p class="empty">まだ商品がありません。「商品を編集」から商品を追加してください。</p>';
   h+=list.map((p,i)=>{const st=typeof p.stock==='number';return `<button class="tile${st&&p.stock===0&&!edit?' out':''}" data-id="${p.id}">
-    ${p.img?`<img class="ph" src="${p.img}" alt="">`:'<div class="noimg">🛒</div>'}
+    <div class="pic">${p.img?`<img class="ph" src="${p.img}" alt="">`:'<div class="noimg">🛒</div>'}</div>
     ${!edit&&cart[p.id]?`<span class="badge">${cart[p.id]}</span>`:''}
     ${!edit&&st&&p.stock===0?'<span class="soldout">売り切れ</span>':''}
     ${edit?`<span class="mvs"><span class="mv" role="button" aria-label="前へ移動" data-mv="-1"${i===0?' style="visibility:hidden"':''}>◀</span><span class="mv" role="button" aria-label="後ろへ移動" data-mv="1"${i===list.length-1?' style="visibility:hidden"':''}>▶</span></span>`:''}
