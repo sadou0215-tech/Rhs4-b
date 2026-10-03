@@ -101,7 +101,14 @@ dialog textarea:disabled{opacity:.4}
 #whoDlg li{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line)}
 #whoDlg li span:first-child{overflow-wrap:anywhere}
 #whoDlg h3{margin:12px 0 4px;font-size:.95rem}
+.cat:disabled{opacity:.4;cursor:not-allowed}
+.gmv{display:inline-block;padding:0 8px;color:var(--main);font-weight:800}
+.cat[aria-pressed=true] .gmv{color:var(--onmain)}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:6px 0}
+.keys button{padding:12px 0;font-size:1.25rem;font-weight:700;border:1px solid var(--line);background:var(--bg);border-radius:10px}
+.keys button:active{background:var(--line)}
 @media (max-width:800px){
+ .keys button{padding:8px 0;font-size:1.1rem}
  .app{grid-template-columns:minmax(0,1fr)}
  .cart{border-left:0;border-top:1px solid var(--line);top:auto;bottom:0;height:auto;max-height:52vh;max-height:52dvh;z-index:5}
  .lines{max-height:16dvh}
@@ -158,11 +165,18 @@ const ADMIN_EMAILS=["sadou0215@gmail.com"];
     <div class="pay">
       <div class="total"><span>合計</span><output id="total">¥0</output></div>
       <div class="paid">
-        <input id="paid" type="number" inputmode="numeric" min="0" placeholder="お預かり金額">
+        <input id="paid" type="text" readonly inputmode="none" placeholder="お預かり金額">
         <button data-p="exact">ちょうど</button>
         <button data-p="1000">1,000</button>
         <button data-p="5000">5,000</button>
         <button data-p="10000">10,000</button>
+        <button data-p="clear">クリア</button>
+      </div>
+      <div class="keys" id="keys">
+        <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+        <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+        <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+        <button data-k="0">0</button><button data-k="00">00</button><button data-k="B" aria-label="1文字消す">⌫</button>
       </div>
       <div class="change"><span id="cl">お釣り</span><span id="cv"></span></div>
       <button class="done" id="done">会計をおわる</button>
@@ -176,8 +190,8 @@ const ADMIN_EMAILS=["sadou0215@gmail.com"];
   <input type="file" id="file" accept="image/*">
   <label for="nm">商品名</label>
   <input type="text" id="nm" maxlength="30">
-  <label for="pr">値段(円)</label>
-  <input type="number" id="pr" inputmode="numeric" min="0">
+  <label for="pr">値段(円・0円もOK)</label>
+  <input type="number" id="pr" inputmode="numeric" min="0" placeholder="0">
   <label for="ct">ジャンル(例: ドリンク。空欄なら未分類)</label>
   <input type="text" id="ct" list="ctl" maxlength="20">
   <datalist id="ctl"></datalist>
@@ -293,11 +307,19 @@ function drawCart(){
   $('#total').textContent=yen(total());
   drawChange();
 }
+function flowBlock(){
+  if(edit)return '';
+  const names=genreList();if(!names.length)return '';
+  const first=names.slice(0,-1).find(n=>!chosen(n));
+  if(first)return `「${first}」から選んでください`;
+  if(!visitedLast)return '一番右のジャンルまで進んでください';
+  return '';
+}
 function updateDone(){
   const b=$('#done'),n=Object.keys(cart).length+Object.keys(freeCart).length,pv=parseInt($('#paid').value,10);
-  const need=n>0&&total()>0&&isNaN(pv);
-  b.disabled=need;
-  b.textContent=need?'お預かり金額を入力してください':'会計をおわる';
+  const flow=flowBlock(),need=n>0&&total()>0&&isNaN(pv);
+  b.disabled=!!flow||need;
+  b.textContent=flow||(need?'お預かり金額を入力してください':'会計をおわる');
 }
 function drawChange(){
   updateDone();
@@ -330,14 +352,21 @@ $('#lines').addEventListener('click',e=>{
   if(b.dataset.fm&&--freeCart[b.dataset.fm]<=0)delete freeCart[b.dataset.fm];
   redraw();
 });
-function setEdit(v){edit=v;const b=$('#editBtn');b.setAttribute('aria-pressed',edit);b.textContent=edit?'編集をおわる':'商品を編集';drawGrid()}
+function setEdit(v){edit=v;const b=$('#editBtn');b.setAttribute('aria-pressed',edit);b.textContent=edit?'編集をおわる':'商品を編集';drawCats();drawGrid();updateDone()}
 $('#editBtn').onclick=()=>{if(edit)return setEdit(false);openGate('edit')};
 $('#paid').oninput=drawChange;
+$('#keys').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  const k=b.dataset.k;let v=$('#paid').value;
+  v=k==='B'?v.slice(0,-1):(v+k).replace(/^0+(?=\d)/,'');
+  if(v.length>8)return;
+  $('#paid').value=v;drawChange();
+});
 document.querySelector('.paid').addEventListener('click',e=>{
   const p=e.target.dataset.p;if(!p)return;
-  $('#paid').value=p==='exact'?total():p;drawChange();
+  $('#paid').value=p==='exact'?total():p==='clear'?'':p;drawChange();
 });
-const reset=()=>{cart={};freeCart={};$('#paid').value='';redraw()};
+const reset=()=>{cart={};freeCart={};visitedLast=false;$('#paid').value='';redraw()};
 $('#clear').onclick=()=>{if(!(Object.keys(cart).length+Object.keys(freeCart).length)||confirm('お会計の内容を全部消しますか?'))reset()};
 const SALES='reji-sales-v1',PW='reji-pw-v1',PWE='reji-pwe-v1';
 const rd=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
@@ -346,6 +375,7 @@ const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth
 $('#done').onclick=()=>{
   const items=products.filter(p=>nq(p.id));
   if(!items.length)return;
+  if(flowBlock())return;
   const t=total(),pv=parseInt($('#paid').value,10);
   if(!isNaN(pv)&&pv<t){alert('お預かり金額が足りません。');return}
   if(isNaN(pv)&&t>0)return;
@@ -422,15 +452,53 @@ function moveProduct(id,dir){
 let cat='all';
 const catOf=p=>(p.category||'').trim();
 const inCat=p=>cat==='all'||(cat==='none'?!catOf(p):'c:'+catOf(p)===cat);
-function drawCats(){
-  const names=[...new Set(products.map(catOf).filter(Boolean))];
-  const tabs=[['all','すべて'],...names.map(n=>['c:'+n,n])];
-  if(names.length&&products.some(p=>!catOf(p)))tabs.push(['none','未分類']);
-  if(!tabs.some(t=>t[0]===cat))cat='all';
-  const el=$('#cats');el.hidden=!names.length;
-  el.innerHTML=tabs.map(([k,l])=>`<button class="cat" data-c="${esc(k)}" aria-pressed="${k===cat}">${esc(l)}</button>`).join('');
+const GEN='reji-genres-v1';
+let genreCache=[],visitedLast=false;
+const getGenreOrder=()=>sync?genreCache:rd(GEN,[]);
+function genreList(){
+  const names=[...new Set(products.map(catOf).filter(Boolean))],ord=getGenreOrder();
+  return [...ord.filter(n=>names.includes(n)),...names.filter(n=>!ord.includes(n))];
 }
-$('#cats').addEventListener('click',e=>{const b=e.target.closest('.cat');if(!b)return;cat=b.dataset.c;drawCats();drawGrid()});
+/* そのジャンルから何か選んだ(売り切れしかないジャンルは選んだ扱い) */
+function chosen(n){
+  const ps=products.filter(p=>catOf(p)===n);
+  return ps.some(p=>nq(p.id)>0)||ps.every(p=>typeof p.stock==='number'&&p.stock<=0);
+}
+function moveGenre(name,dir){
+  const list=genreList(),i=list.indexOf(name),j=i+dir;
+  if(i<0||j<0||j>=list.length)return;
+  [list[i],list[j]]=[list[j],list[i]];
+  if(sync){genreCache=list;db.doc('config/genres').set({order:list}).catch(fail)}else wr(GEN,list);
+  drawCats();
+}
+function drawCats(){
+  const names=genreList(),none=products.some(p=>!catOf(p)),el=$('#cats');
+  el.hidden=!names.length;
+  if(!names.length){cat='all';visitedLast=true;el.innerHTML='';return}
+  const seq=!edit,open=i=>!seq||names.slice(0,i).every(chosen);
+  const tabs=[];
+  if(edit)tabs.push(['all','すべて']);
+  names.forEach((n,i)=>tabs.push(['c:'+n,n,i]));
+  if(none)tabs.push(['none','未分類']);
+  const ok=tabs.some(t=>t[0]===cat)&&!(cat.startsWith('c:')&&!open(names.indexOf(cat.slice(2))));
+  if(!ok){
+    if(seq){let k=0;while(k<names.length-1&&chosen(names[k]))k++;cat='c:'+names[k];visitedLast=false}
+    else cat='all';
+  }
+  if(seq&&cat==='c:'+names[names.length-1])visitedLast=true;
+  el.innerHTML=tabs.map(([k,l,i])=>{
+    const g=k.startsWith('c:'),locked=g&&!open(i);
+    const L=edit&&g?`<span class="gmv" role="button" aria-label="左へ移動" data-g="${esc(l)}" data-d="-1"${i===0?' style="visibility:hidden"':''}>◀</span>`:'';
+    const R=edit&&g?`<span class="gmv" role="button" aria-label="右へ移動" data-g="${esc(l)}" data-d="1"${i===names.length-1?' style="visibility:hidden"':''}>▶</span>`:'';
+    return `<button class="cat" data-c="${esc(k)}" aria-pressed="${k===cat}"${locked?' disabled':''}>${L}${locked?'🔒 ':''}${esc(l)}${R}</button>`;
+  }).join('');
+}
+$('#cats').addEventListener('click',e=>{
+  const g=e.target.closest('.gmv');
+  if(g){moveGenre(g.dataset.g,+g.dataset.d);return}
+  const b=e.target.closest('.cat');if(!b||b.disabled)return;
+  cat=b.dataset.c;drawCats();drawGrid();updateDone();
+});
 /* --- 保存先(同期モード / この端末だけモード) --- */
 const sync=!!FB.apiKey&&!FB.apiKey.startsWith('ここに');
 let db,salesCache={},pwCache={},pwSeen={},pwLoaded=false,unsubs=[];
@@ -547,6 +615,7 @@ if(sync){
     unsubs.push(db.doc('config/drawer').onSnapshot(d=>{drawerCache=d.exists?d.data():null;if(!$('#rep').hidden)renderRep()},fail));
   unsubs.push(db.collection('drawerLog').orderBy('at','desc').limit(30).onSnapshot(q=>{logCache=q.docs.map(d=>d.data());if(!$('#rep').hidden)renderRep()},fail));
   unsubs.push(db.collection('presence').onSnapshot(q=>{presenceCache={};q.forEach(d=>presenceCache[d.id]=d.data())},()=>{}));
+  unsubs.push(db.doc('config/genres').onSnapshot(d=>{genreCache=d.exists?(d.data().order||[]):[];drawCats();drawGrid();updateDone()},fail));
   [['report','config/pw'],['edit','config/pwe']].forEach(([k,path])=>unsubs.push(db.doc(path).onSnapshot(d=>{pwCache[k]=d.exists?d.data():null;pwSeen[k]=true;pwLoaded=!!(pwSeen.report&&pwSeen.edit)},fail)));
   });
 }
