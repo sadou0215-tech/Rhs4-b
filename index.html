@@ -107,6 +107,8 @@ dialog textarea:disabled{opacity:.4}
 .keys{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:6px 0}
 .keys button{padding:12px 0;font-size:1.25rem;font-weight:700;border:1px solid var(--line);background:var(--bg);border-radius:10px}
 .keys button:active{background:var(--line)}
+#toast{position:fixed;left:50%;bottom:120px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:99px;font-weight:700;z-index:50;max-width:90vw;text-align:center}
+#toast[hidden]{display:none}
 @media (max-width:800px){
  .keys button{padding:8px 0;font-size:1.1rem}
  .app{grid-template-columns:minmax(0,1fr)}
@@ -183,6 +185,8 @@ const ADMIN_EMAILS=["sadou0215@gmail.com"];
     </div>
   </aside>
 </div>
+
+<div id="toast" role="status" hidden></div>
 
 <dialog id="dlg">
   <h2 id="dt" style="margin:0 0 8px;font-size:1.1rem">商品を追加</h2>
@@ -499,6 +503,29 @@ $('#cats').addEventListener('click',e=>{
   const b=e.target.closest('.cat');if(!b||b.disabled)return;
   cat=b.dataset.c;drawCats();drawGrid();updateDone();
 });
+/* --- スワイプでジャンル切り替え(ロック中のジャンルへは進めない) --- */
+let toastT;
+function toast(m){const el=$('#toast');el.textContent=m;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>el.hidden=true,2200)}
+function swipeGenre(dir){
+  const btns=[...document.querySelectorAll('#cats .cat')];
+  if(!btns.length)return;
+  const i=btns.findIndex(b=>b.dataset.c===cat),j=i+dir;
+  if(i<0||j<0||j>=btns.length)return;
+  if(btns[j].disabled){toast('いまのジャンルから1つ選ぶと、右に進めます');return}
+  cat=btns[j].dataset.c;drawCats();drawGrid();updateDone();
+}
+let sx=0,sy=0,st0=0,sOK=false;
+document.addEventListener('touchstart',e=>{
+  sOK=e.touches.length===1&&!document.querySelector('dialog[open]')&&!e.target.closest('.cart,#cats,#glance,header');
+  if(!sOK)return;
+  const t=e.touches[0];sx=t.clientX;sy=t.clientY;st0=Date.now();
+},{passive:true});
+document.addEventListener('touchend',e=>{
+  if(!sOK)return;sOK=false;
+  const t=e.changedTouches[0],dx=t.clientX-sx,dy=t.clientY-sy;
+  if(Date.now()-st0>900||Math.abs(dx)<60||Math.abs(dx)<Math.abs(dy)*1.5)return;
+  swipeGenre(dx<0?1:-1);
+},{passive:true});
 /* --- 保存先(同期モード / この端末だけモード) --- */
 const sync=!!FB.apiKey&&!FB.apiKey.startsWith('ここに');
 let db,salesCache={},pwCache={},pwSeen={},pwLoaded=false,unsubs=[];
